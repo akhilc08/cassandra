@@ -24,3 +24,5 @@ node_modules/
 .DS_Store
 *.db
 *.sqlite
+data/backtest/wiki_events/
+data/backtest/wiki_events_pinned/
