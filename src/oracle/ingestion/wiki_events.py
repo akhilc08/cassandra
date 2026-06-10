@@ -15,6 +15,7 @@ markets.
 
 from __future__ import annotations
 
+import asyncio
 import html as html_lib
 import json
 import re
@@ -30,6 +31,25 @@ logger = structlog.get_logger()
 
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 USER_AGENT = "cassandra-backtest/1.0 (prediction market research)"
+
+# MediaWiki rate-limits anonymous bursts; throttle and back off on 429.
+_rate_lock = asyncio.Lock()
+_THROTTLE_SECONDS = 0.5
+_BACKOFF_SECONDS = 12.0
+
+
+async def _api_get(client: httpx.AsyncClient, params: dict) -> dict:
+    async with _rate_lock:
+        for attempt in range(4):
+            await asyncio.sleep(_THROTTLE_SECONDS)
+            resp = await client.get(WIKI_API, params=params, headers={"User-Agent": USER_AGENT})
+            if resp.status_code == 429:
+                logger.warning("wiki_events.rate_limited", attempt=attempt)
+                await asyncio.sleep(_BACKOFF_SECONDS * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            return resp.json()
+    raise RuntimeError("wikipedia API rate limit persisted after retries")
 
 _MONTHS = [
     "January", "February", "March", "April", "May", "June",
@@ -58,22 +78,17 @@ async def _pinned_revision_id(
 ) -> int | None:
     """Last revision of day page D saved before D+1 00:00 UTC."""
     rvstart = f"{(d + timedelta(days=1)).isoformat()}T00:00:00Z"
-    resp = await client.get(
-        WIKI_API,
-        params={
-            "action": "query",
-            "prop": "revisions",
-            "titles": f"Portal:Current_events/{day_slug(d)}",
-            "rvlimit": "1",
-            "rvdir": "older",
-            "rvstart": rvstart,
-            "format": "json",
-            "formatversion": "2",
-        },
-        headers={"User-Agent": USER_AGENT},
-    )
-    resp.raise_for_status()
-    pages = resp.json().get("query", {}).get("pages", [])
+    payload = await _api_get(client, {
+        "action": "query",
+        "prop": "revisions",
+        "titles": f"Portal:Current_events/{day_slug(d)}",
+        "rvlimit": "1",
+        "rvdir": "older",
+        "rvstart": rvstart,
+        "format": "json",
+        "formatversion": "2",
+    })
+    pages = payload.get("query", {}).get("pages", [])
     if not pages or "revisions" not in pages[0]:
         return None
     return pages[0]["revisions"][0]["revid"]
@@ -100,19 +115,14 @@ async def fetch_day_events(
             # Page did not exist by end of day D — no contemporaneous evidence.
             cache_file.write_text(json.dumps({"revid": 0, "lines": []}))
             return []
-        resp = await client.get(
-            WIKI_API,
-            params={
-                "action": "parse",
-                "oldid": str(revid),
-                "prop": "text",
-                "format": "json",
-                "formatversion": "2",
-            },
-            headers={"User-Agent": USER_AGENT},
-        )
-        resp.raise_for_status()
-        lines = parse_day_page(resp.json().get("parse", {}).get("text", ""))
+        payload = await _api_get(client, {
+            "action": "parse",
+            "oldid": str(revid),
+            "prop": "text",
+            "format": "json",
+            "formatversion": "2",
+        })
+        lines = parse_day_page(payload.get("parse", {}).get("text", ""))
     except Exception as e:
         logger.warning("wiki_events.fetch_failed", day=d.isoformat(), error=str(e))
         return []

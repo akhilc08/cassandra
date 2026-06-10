@@ -334,7 +334,8 @@ async def stage_refresh(args) -> None:
             if i % 25 == 0:
                 print(f"  refreshed {i}/{len(rows)} (dropped {dropped})")
 
-    tmp = MARKETS_FILE.with_suffix(".jsonl.tmp")
+    import os
+    tmp = MARKETS_FILE.with_suffix(f".jsonl.tmp{os.getpid()}")
     with tmp.open("w") as out:
         for row in kept:
             out.write(json.dumps(row) + "\n")
@@ -386,9 +387,12 @@ async def stage_probe(args) -> None:
         return
     blind = sum(r["blind_brier"] for r in ok) / len(ok)
     market = sum(r["market_brier"] for r in ok) / len(ok)
+    # "Knows" = confidently right about the side the market confidently
+    # rejected. Near-0.5 estimates are generic uncertainty, not knowledge.
     knows = sum(
         1 for r in ok
-        if (r["p_blind"] >= 0.6) == r["outcome"] and (r["p_market"] >= 0.4) != r["outcome"]
+        if (r["p_blind"] >= 0.75 if r["outcome"] else r["p_blind"] <= 0.25)
+        and (r["p_market"] <= 0.25 if r["outcome"] else r["p_market"] >= 0.75)
     )
     print(f"\nProbe ({len(ok)} most surprising outcomes, evidence-blind, model={FORECAST_MODEL}):")
     print(f"  Brier blind={blind:.4f} vs market={market:.4f} (market should win big here)")

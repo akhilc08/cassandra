@@ -2,7 +2,7 @@
 
 Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra ingests multi-modal signals, reasons over a hybrid knowledge graph, and executes paper trades — end to end, no human in the loop.
 
-**87% accuracy · 45% ROI on high-confidence markets · 96% hallucination catch rate · 11.5s p50 latency**
+**+23% out-of-sample ROI on 57 simulated trades (90% CI −9%…+59%) in a leak-controlled time-machine backtest against real market prices**
 
 ---
 
@@ -57,70 +57,53 @@ Oracle runs a continuous prediction pipeline:
 
 ## Backtest results
 
-Backtested against 50 resolved Polymarket markets (crypto price/outcome markets, Apr 2026).
-Infrastructure: NewsAPI for evidence, Claude Code CLI for synthesis and reflection. Neo4j/Qdrant offline (no local instance), so results reflect news-only evidence.
+A **time-machine backtest** against 286 resolved Polymarket markets (Feb–Jun 2026, median volume $1.1M, max 2 markets per event). For each market, the pipeline travels to T = 24h before scheduled close and trades at the **real market price at T** (from the CLOB price-history API), settling at the actual resolution.
 
-### Best run (calibrated pipeline)
+### Methodology — leakage controls
 
-| Metric | Value | Baseline |
-|--------|-------|----------|
-| Brier score | 0.250 | random = 0.25 |
-| Accuracy | 68% | — |
-| Calibration error | 0.314 | 0 = perfect |
-| Alpha rate | 66% | — |
-| Hallucination catch | 96% | — |
-| Latency p50 | 11.5s | — |
+An earlier version of this backtest had every classic lookahead bug (settlement price used as entry price, news fetched at run time with no date bound). The current harness was rebuilt around one rule: *nothing the forecaster or the trade decision sees may postdate T*.
 
-### Hit rate by confidence tier
+| Channel | Control |
+|---------|---------|
+| Entry price | CLOB `prices-history`: last trade ≤ T (max 3h stale), never `outcomePrices` |
+| News evidence | Wikipedia Current Events day pages **pinned to their last revision before D+1 00:00 UTC** via the MediaWiki revisions API — post-hoc hindsight edits excluded (a current-revision fetch was worth ~10 extra lines/page of hindsight) |
+| Model knowledge | Forecaster pinned to `claude-fable-5` (training cutoff Jan 2026); all backtested markets close Feb 2026+ |
+| Model tools | `claude -p` runs with WebSearch/WebFetch/Bash/etc. explicitly disallowed |
+| Leakage probe | Evidence-blind forecasts on the 20 most market-surprising outcomes: blind Brier 0.50 vs market 0.70, **1/18 strict "knows the surprise"** — and the model is confidently *wrong* about post-cutoff BTC prices, confirming its knowledge ends at the cutoff |
+| Anchoring | The forecaster never sees the market price (shown the price, it anchored within ±1¢ on 12/12 pilot markets); shrinkage toward the market happens in the strategy layer |
+| Overfitting | Strategy grid (α, τ, evidence gate, divergence cap) tuned on train (close < May 1, n=212), frozen, evaluated **once** on test (May–Jun, n=74); CIs use event-cluster bootstrap |
 
-| Tier | Hit rate | n |
-|------|----------|---|
-| 50–60% | 100% | 4 |
-| 60–70% | 100% | 4 |
-| 70–80% | 82% | 17 |
+Strategy: blend `p = α·p_model + (1−α)·p_market`, buy the cheap side when `|p − p_market| > τ`, 1¢ slippage, flat $100 stakes. Frozen params from train: α=0.75, τ=0.03, no evidence gate.
 
-When the model reaches ≥60% confidence, it is correct 100% of the time (8/8). The 0.5 abstentions (markets with no relevant news evidence) are the drag on overall EV.
+### Out-of-sample results (test: May–Jun 2026)
 
-### Pipeline evolution
+| Metric | Strategy | always-NO | buy-favorite (≥90¢) | pure model (α=1, τ=0.05) |
+|--------|----------|-----------|----------------------|--------------------------|
+| Trades | 57 | 74 | 10 | 55 |
+| P&L (flat $100) | **+$1,323** | +$838 | +$51 | +$1,361 |
+| ROI | **+23.2%** | +11.3% | +5.1% | +24.7% |
+| 90% CI (per-trade ROI) | −9.3% … +58.8% | −12.6% … +36.1% | +3.8% … +6.5% | −9.2% … +64.0% |
+| Win rate | 49.1% | 58.1% | 100% | 49.1% |
+| Max drawdown | $962 | $596 | $0 | $962 |
 
-| State | Brier | Notes |
-|-------|-------|-------|
-| Broken (deprecated model + bad API key) | 0.331 | Flat 0.35 on every market |
-| Fixed model + NewsAPI | 0.605 | Overconfident, wrong direction |
-| Cache fix + lower Claude threshold | 0.240 | Below random — first real signal |
-| Abstain at 0.5 when no evidence | 0.250 | EV still negative from coin-flip abstentions |
-| Claude CLI synthesis + calibrated prompt | **0.250** | 66% alpha rate, 100% hit at ≥60% confidence |
+Train (in-sample): +$1,561 on 162 trades (+9.6% ROI). Quarter-Kelly compounding on test: $1,000 → $1,309.
 
-### Key highlights
+### Honest read of the numbers
 
-- **100% precision at ≥60% confidence** (8/8 markets correct)
-- **96% hallucination catch rate** across 50 resolved markets
-- **68% accuracy** on crypto outcome markets with news-only evidence (no knowledge base)
-- Pipeline iterated from **0.331 → 0.250 Brier** through 5 engineering iterations
-
-Built a prediction pipeline backtested on 50 live Polymarket markets achieving 100% precision on high-confidence signals and 96% hallucination detection; iterated from broken baseline to calibrated output through systematic debugging of model routing, evidence retrieval, and confidence thresholds.
-
-### Estimated profit (illustrative, based on assumptions)
-
-> These are estimates using assumed market prices and a flat $100/market bet size. Actual profit depends on market prices at prediction time, which were not logged in this backtest run.
-
-| Tier | n | Hit rate | Assumed market price | Avg edge | EV per $100 bet | Total EV |
-|------|---|----------|----------------------|----------|-----------------|----------|
-| 60–70% | 4 | 100% | ~55% | ~+10% | +$10 | +$40 |
-| 70–80% | 17 | 82% | ~60% | ~+15% | +$12 | +$204 |
-| 50–60% | 4 | 100% | ~50% | ~+5% | +$5 | +$20 |
-
-**Estimated gross profit: ~$200–$300 on $2,500 notional (25 markets × $100)**
-
-To produce real profit figures, the backtest needs to log the market price at prediction time. See `scripts/backtest.py`.
+- **The 90% CI includes zero.** +23% ROI on 57 trades is *consistent with* edge, not proof of it. Roughly 200+ trades at this mean would be needed for significance.
+- **Profit is concentrated and skewed**: the top 5 trades contribute +$2,085; the other 52 net −$762. The book wins by buying cheap sides (41/57 entries under 50¢) with ~7:1 payoffs, at a 49% win rate.
+- **The NO side carried it**: +$1,278 from 40 NO trades vs +$45 from 17 YES trades, in a period whose base rate favored NO (mechanical always-NO made +11.3%). The strategy's excess over always-NO (+12pp) and its win on the YES side too are the actual evidence of model value.
+- **The model is not better calibrated than the market** (test Brier: blend 0.214 vs market 0.202). The P&L comes from selective, payoff-asymmetric disagreement — not from beating the market on average.
+- **No cutoff-decay pattern**: the model's Brier gap vs the market *shrinks* from Feb (+0.026) to May (+0.009) — the opposite of what parametric leakage would produce.
 
 ### Known limitations
 
-- NewsAPI free tier: 100 req/day — exhausted quickly at 50 markets/run
-- Neo4j + Qdrant offline: no knowledge base, evidence is news-only
-- All markets are crypto price/outcome (Polymarket's recent closed set is dominated by these)
-- Claude synthesis relies on Claude Code CLI (`claude -p`) — requires active session
-- Profit estimates above are illustrative — market prices at prediction time were not recorded
+- 57 test trades is a small book; the result needs forward (paper-trading) confirmation before real capital.
+- Market universe filtered on **final** volume (post-T information) — selection, not leakage, but live deployment would select on volume-to-date.
+- Universe limited to markets still open 24h before *scheduled* close with clean YES/NO resolution; early-resolving and disputed markets are excluded.
+- 1¢ flat slippage approximates execution; thin books would fill worse than the last-trade price.
+- GDELT is rate-limited to uselessness from this network; evidence is Wikipedia-only (60/286 markets had relevant pinned events) plus the model's pre-cutoff knowledge.
+- Reproducing: `scripts/backtest.py` stages are cached and resumable — `collect → refresh → probe → predict → evaluate`. Full artifacts in `data/backtest/evaluation.json`.
 
 ---
 
