@@ -140,6 +140,7 @@ async def fetch_candidate_markets(
     window = start
     while window < end:
         window_end = min(window + timedelta(days=7), end)
+        window_count = 0
         for offset in (0, 100, 200, 300):
             params = {
                 "closed": "true",
@@ -151,13 +152,19 @@ async def fetch_candidate_markets(
                 "end_date_max": window_end.strftime("%Y-%m-%d"),
                 "volume_num_min": str(min_volume),
             }
-            try:
-                resp = await client.get(f"{GAMMA_API}/markets", params=params)
-                resp.raise_for_status()
-                markets = resp.json()
-            except Exception as e:
-                logger.warning("collect.gamma_failed", window=str(window.date()), error=str(e))
-                break
+            markets = None
+            for attempt in range(3):
+                await asyncio.sleep(0.3 * (1 + attempt * 10))
+                try:
+                    resp = await client.get(f"{GAMMA_API}/markets", params=params)
+                    resp.raise_for_status()
+                    markets = resp.json()
+                    break
+                except Exception as e:
+                    logger.warning(
+                        "collect.gamma_failed",
+                        window=str(window.date()), offset=offset, attempt=attempt, error=str(e)[:120],
+                    )
             if not isinstance(markets, list) or not markets:
                 break
             for m in markets:
@@ -183,8 +190,10 @@ async def fetch_candidate_markets(
                     continue
                 seen_events[event_id] = seen_events.get(event_id, 0) + 1
                 candidates.append(m)
+                window_count += 1
             if len(markets) < 100:
                 break
+        print(f"  window {window.date()}: +{window_count} candidates ({len(candidates)} total)")
         window = window_end
     return candidates
 

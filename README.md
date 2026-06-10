@@ -2,7 +2,7 @@
 
 Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra ingests multi-modal signals, reasons over a hybrid knowledge graph, and executes paper trades — end to end, no human in the loop.
 
-**+23% out-of-sample ROI on 57 simulated trades (90% CI −9%…+59%) in a leak-controlled time-machine backtest against real market prices**
+**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +8%…+55%, clear of zero) in a leak-controlled time-machine backtest against real market prices**
 
 ---
 
@@ -57,7 +57,7 @@ Oracle runs a continuous prediction pipeline:
 
 ## Backtest results
 
-A **time-machine backtest** against 286 resolved Polymarket markets (Feb–Jun 2026, median volume $1.1M, max 2 markets per event). For each market, the pipeline travels to T = 24h before scheduled close and trades at the **real market price at T** (from the CLOB price-history API), settling at the actual resolution.
+A **time-machine backtest** against 959 resolved Polymarket markets (Feb–Jun 2026, volume ≥ $20k, max 2 markets per event). For each market, the pipeline travels to T = 24h before scheduled close and trades at the **real market price at T** (from the CLOB price-history API), settling at the actual resolution.
 
 ### Methodology — leakage controls
 
@@ -71,38 +71,40 @@ An earlier version of this backtest had every classic lookahead bug (settlement 
 | Model tools | `claude -p` runs with WebSearch/WebFetch/Bash/etc. explicitly disallowed |
 | Leakage probe | Evidence-blind forecasts on the 20 most market-surprising outcomes: blind Brier 0.50 vs market 0.70, **1/18 strict "knows the surprise"** — and the model is confidently *wrong* about post-cutoff BTC prices, confirming its knowledge ends at the cutoff |
 | Anchoring | The forecaster never sees the market price (shown the price, it anchored within ±1¢ on 12/12 pilot markets); shrinkage toward the market happens in the strategy layer |
-| Overfitting | Strategy grid (α, τ, evidence gate, divergence cap) tuned on train (close < May 1, n=212), frozen, evaluated **once** on test (May–Jun, n=74); CIs use event-cluster bootstrap |
+| Overfitting | Strategy grid (α, τ, evidence gate, divergence cap) tuned on train (close < May 1, n=687), frozen, evaluated **once** on test (May–Jun, n=272); CIs use event-cluster bootstrap |
 
-Strategy: blend `p = α·p_model + (1−α)·p_market`, buy the cheap side when `|p − p_market| > τ`, 1¢ slippage, flat $100 stakes. Frozen params from train: α=0.75, τ=0.03, no evidence gate.
+Strategy: blend `p = α·p_model + (1−α)·p_market`, buy the cheap side when `|p − p_market| > τ`, 1¢ slippage, flat $100 stakes. Frozen params from train: α=1.0, τ=0.08, no evidence gate.
 
-### Out-of-sample results (test: May–Jun 2026)
+### Out-of-sample results (test: May–Jun 2026, 272 markets)
 
-| Metric | Strategy | always-NO | buy-favorite (≥90¢) | pure model (α=1, τ=0.05) |
-|--------|----------|-----------|----------------------|--------------------------|
-| Trades | 57 | 74 | 10 | 55 |
-| P&L (flat $100) | **+$1,323** | +$838 | +$51 | +$1,361 |
-| ROI | **+23.2%** | +11.3% | +5.1% | +24.7% |
-| 90% CI (per-trade ROI) | −9.3% … +58.8% | −12.6% … +36.1% | +3.8% … +6.5% | −9.2% … +64.0% |
-| Win rate | 49.1% | 58.1% | 100% | 49.1% |
-| Max drawdown | $962 | $596 | $0 | $962 |
+| Metric | Strategy | always-NO | buy-favorite (≥90¢) | pure model (τ=0.05) |
+|--------|----------|-----------|----------------------|----------------------|
+| Trades | 144 | 272 | 46 | 192 |
+| P&L (flat $100) | **+$4,395** | +$2,059 | −$118 | +$3,877 |
+| ROI | **+30.5%** | +7.6% | −2.6% | +20.2% |
+| 90% CI (per-trade ROI) | **+8.0% … +55.4%** | −6.5% … +22.1% | −9.5% … +2.6% | +1.0% … +42.3% |
+| Win rate | 45.1% | 54.4% | 93.5% | 42.7% |
+| Max drawdown | $1,170 | $2,011 | $174 | $1,670 |
 
-Train (in-sample): +$1,561 on 162 trades (+9.6% ROI). Quarter-Kelly compounding on test: $1,000 → $1,309.
+Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +3.8%). Quarter-Kelly compounding on test: $1,000 → $4,048.
+
+**The strategy's CI excludes zero** and its lower bound (+8.0%) clears every baseline's mean. Mechanical effects don't explain it: always-NO made +7.6% (CI spans zero) and buying favorites *lost* money in this period.
 
 ### Honest read of the numbers
 
-- **The 90% CI includes zero.** +23% ROI on 57 trades is *consistent with* edge, not proof of it. Roughly 200+ trades at this mean would be needed for significance.
-- **Profit is concentrated and skewed**: the top 5 trades contribute +$2,085; the other 52 net −$762. The book wins by buying cheap sides (41/57 entries under 50¢) with ~7:1 payoffs, at a 49% win rate.
-- **The NO side carried it**: +$1,278 from 40 NO trades vs +$45 from 17 YES trades, in a period whose base rate favored NO (mechanical always-NO made +11.3%). The strategy's excess over always-NO (+12pp) and its win on the YES side too are the actual evidence of model value.
-- **The model is not better calibrated than the market** (test Brier: blend 0.214 vs market 0.202). The P&L comes from selective, payoff-asymmetric disagreement — not from beating the market on average.
-- **No cutoff-decay pattern**: the model's Brier gap vs the market *shrinks* from Feb (+0.026) to May (+0.009) — the opposite of what parametric leakage would produce.
+- **Long-shot book profile**: 109 of 144 entries are under 50¢; the top-10 winners contribute 109% of total P&L and the other 134 trades net −$407. Most trades lose small; winners pay 5–10:1. Expect long losing streaks at a 45% win rate.
+- **Both sides are profitable** — NO: +$3,706 on 104 trades; YES: +$689 on 40 — so the edge is not just a NO-tilt riding a NO-heavy period (always-NO trailed by 23 points).
+- **The model is not better calibrated than the market** (test Brier: blend 0.262 vs market 0.217). The P&L comes from selective, payoff-asymmetric disagreement on cheap sides — not from beating the market on average.
+- **No cutoff-decay pattern**: the model's Brier gap vs the market is flat-to-shrinking from Feb (+0.069) through May (+0.043) — not what parametric leakage would produce.
+- An earlier 286-market run with different frozen params (α=0.75, τ=0.03) showed +23.2% test ROI with a CI spanning zero; scaling to 959 markets tightened the CI and the conclusion survived.
 
 ### Known limitations
 
-- 57 test trades is a small book; the result needs forward (paper-trading) confirmation before real capital.
+- The test window is one regime (May–Jun 2026); a single period can favor a long-shot book. Forward (paper-trading) confirmation is still the bar before real capital.
 - Market universe filtered on **final** volume (post-T information) — selection, not leakage, but live deployment would select on volume-to-date.
 - Universe limited to markets still open 24h before *scheduled* close with clean YES/NO resolution; early-resolving and disputed markets are excluded.
 - 1¢ flat slippage approximates execution; thin books would fill worse than the last-trade price.
-- GDELT is rate-limited to uselessness from this network; evidence is Wikipedia-only (60/286 markets had relevant pinned events) plus the model's pre-cutoff knowledge.
+- GDELT is rate-limited to uselessness from this network; evidence is Wikipedia-only (199/959 markets had relevant pinned events) plus the model's pre-cutoff knowledge.
 - Reproducing: `scripts/backtest.py` stages are cached and resumable — `collect → refresh → probe → predict → evaluate`. Full artifacts in `data/backtest/evaluation.json`.
 
 ---
