@@ -96,6 +96,7 @@ Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +3.8%). Quarter-Kel
 - **Both sides are profitable** — NO: +$3,706 on 104 trades; YES: +$689 on 40 — so the edge is not just a NO-tilt riding a NO-heavy period (always-NO trailed by 23 points).
 - **The model is not better calibrated than the market** (test Brier: blend 0.262 vs market 0.217). The P&L comes from selective, payoff-asymmetric disagreement on cheap sides — not from beating the market on average.
 - **No cutoff-decay pattern**: the model's Brier gap vs the market is flat-to-shrinking from Feb (+0.069) through May (+0.043) — not what parametric leakage would produce.
+- **The edge is not stale-crypto luck**: sports markets carry the test book (116/144 trades, +$2,798, +24.1% ROI) on stable team-strength priors; crypto-price markets contributed only 10 trades. Excluding the 5 extreme-divergence trades (>30¢) still leaves +$2,665 on 139 trades.
 - An earlier 286-market run with different frozen params (α=0.75, τ=0.03) showed +23.2% test ROI with a CI spanning zero; scaling to 959 markets tightened the CI and the conclusion survived.
 
 ### Known limitations
