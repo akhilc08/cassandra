@@ -109,6 +109,24 @@ Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +3.8%). Quarter-Kel
 
 ---
 
+## Forward test (live paper trading)
+
+The backtest's remaining blind spots — real spreads, executability, regime dependence — are covered by a forward paper-trading test running the **identical frozen system** against live markets:
+
+- **Pre-registered 2026-06-10** (from the 687-market train split): α=1.0, τ=0.08, 3–97¢ bounds, flat $100 paper stakes. Not retuned while the test runs.
+- **Fills at the real ask** from the live CLOB order book (stricter than the backtest's last-trade + 1¢), decision edge measured against the book mid.
+- **Two arms per market**: `replica` (wiki-events evidence only, exactly as backtested — tests whether the backtest generalizes) and `enhanced` (web search enabled, legitimate live — tests whether richer evidence adds edge).
+- Every decision is logged at decision time (forecast, reasoning, book snapshot, fill) to `data/forward/decisions.jsonl`, including no-trades.
+- **Success bar** before any real capital: ~100 settled trades, positive P&L, cluster-bootstrap CI lower bound above −5%, replica arm consistent with its backtest CI.
+
+```bash
+# daily scan + settlement (e.g. cron at 14:00 UTC)
+python scripts/forward_test.py scan
+python scripts/forward_test.py settle    # also prints the running report
+```
+
+---
+
 ## Numbers
 
 ### Retrieval

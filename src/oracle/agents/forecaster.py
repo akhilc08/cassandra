@@ -127,16 +127,21 @@ def parse_forecast(text: str) -> Forecast:
     )
 
 
-async def _call_claude(prompt: str, timeout: int = 120) -> str:
-    # Tools are disabled so the model cannot search the web at "prediction
-    # time" and read post-resolution news — that would be lookahead leakage.
-    # cwd=/tmp and no setting sources keep session CLAUDE.md context out of
-    # the forecast; the model is pinned for reproducibility.
+async def _call_claude(prompt: str, timeout: int = 120, allow_web: bool = False) -> str:
+    # In backtests all tools are disabled so the model cannot search the web
+    # at "prediction time" and read post-resolution news — lookahead leakage.
+    # In live forward-testing (allow_web=True) web search is legitimate:
+    # there is no future to leak. cwd=/tmp and no setting sources keep
+    # session CLAUDE.md context out of the forecast; the model is pinned.
+    disallowed = "Bash,Read,Glob,Grep,Task,Agent,TodoWrite,Edit,Write"
+    if not allow_web:
+        disallowed = "WebSearch,WebFetch," + disallowed
+    args = ["claude", "-p", prompt, "--model", FORECAST_MODEL,
+            "--setting-sources", "", "--disallowedTools", disallowed]
+    if allow_web:
+        args += ["--allowedTools", "WebSearch,WebFetch"]
     proc = await asyncio.create_subprocess_exec(
-        "claude", "-p", prompt,
-        "--model", FORECAST_MODEL,
-        "--setting-sources", "",
-        "--disallowedTools", "WebSearch,WebFetch,Bash,Read,Glob,Grep,Task,Agent,TodoWrite,Edit,Write",
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd="/tmp",
@@ -157,11 +162,15 @@ async def forecast(
     headlines: list[dict],
     world_events: list[dict] | None = None,
     description: str = "",
+    allow_web: bool = False,
+    timeout: int = 120,
 ) -> Forecast:
     """Produce an independent (market-blind) P(YES) for one market as of `as_of`."""
     prompt = build_prompt(question, as_of, headlines, world_events, description)
+    if allow_web:
+        prompt += "\n\nYou MAY use web search to check the latest relevant news before answering."
     try:
-        response = await _call_claude(prompt)
+        response = await _call_claude(prompt, timeout=timeout, allow_web=allow_web)
     except Exception as e:
         logger.warning("forecaster.claude_failed", question=question[:60], error=str(e))
         return Forecast(
