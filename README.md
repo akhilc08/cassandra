@@ -1,57 +1,18 @@
 # Cassandra
 
-Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra ingests multi-modal signals, reasons over a hybrid knowledge graph, and executes paper trades — end to end, no human in the loop.
+Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra forecasts markets with a market-blind LLM, trades the disagreement against real prices, and measures itself with a leak-controlled backtest plus a live forward test — end to end, no human in the loop.
 
-**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +8%…+55%, clear of zero) in a leak-controlled time-machine backtest against real market prices**
-
----
-
-## What it does
-
-Oracle runs a continuous prediction pipeline:
-
-1. **Ingest** — pulls from NewsAPI, Twitter/X, Reddit, government APIs (Congress, CourtListener), polling aggregators, YouTube/podcast audio (Whisper), and chart images (vision)
-2. **Store** — chunks and embeds content into Qdrant (vector DB) and extracts entities into Neo4j (knowledge graph)
-3. **Research** — a multi-agent system generates a structured thesis for each market using hybrid retrieval
-4. **Evaluate** — an LLM judge scores the thesis on 4 dimensions; a hallucination detector verifies every claim against sources
-5. **Reflect** — a self-critique step checks for anchoring, recency, and confirmation biases before committing
-6. **Trade** — the Risk Agent enforces hard guardrails, then the Portfolio Manager executes paper trades
-7. **Learn** — post-resolution post-mortems classify predictions as good-process vs lucky, feeding back into calibration
+**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +8%…+55%, clear of zero) in a leak-controlled time-machine backtest against real market prices — now being confirmed by live paper trading.**
 
 ---
 
-## Architecture
+## How the predictor works
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Ingestion Layer                       │
-│  News · Twitter · Reddit · Gov APIs · Audio · Vision    │
-└───────────────────┬─────────────────────────────────────┘
-                    │
-          ┌─────────▼──────────┐
-          │   Knowledge Store  │
-          │  Neo4j (graph)     │
-          │  Qdrant (vectors)  │
-          └─────────┬──────────┘
-                    │
-     ┌──────────────▼──────────────┐
-     │     Hybrid Retrieval        │
-     │  Vector · BM25 · Graph      │
-     │  RRF Fusion · BGE Reranker  │
-     └──────────────┬──────────────┘
-                    │
-     ┌──────────────▼──────────────────────────┐
-     │            Agent Pipeline               │
-     │  Research → Reflection → Judge          │
-     │  Hallucination Check → Risk → Trade     │
-     └──────────────┬──────────────────────────┘
-                    │
-     ┌──────────────▼──────────────┐
-     │       Observability         │
-     │  Prometheus · Grafana       │
-     │  LLM Tracer · SSE Dashboard │
-     └─────────────────────────────┘
-```
+1. **Forecast (market-blind)** — a pinned LLM (`claude-fable-5`) estimates P(YES) from dated evidence and base rates, *without seeing the market price*. Shown the price, LLMs anchor to it within ±1¢ — which destroys the signal. Evidence comes from revision-pinned Wikipedia Current Events pages (plus web search in live mode).
+2. **Blend & decide** — the strategy layer shrinks the forecast toward the market (`p = α·p_model + (1−α)·p_market`) and buys the cheap side when the divergence exceeds a threshold τ. α and τ are tuned on a train split and frozen.
+3. **Verify** — every claim of edge is checked against real prices at decision time: a time-machine backtest over 959 resolved markets, and a forward paper-trading test on live order books.
+
+The repo also contains the larger always-on platform (multi-source ingestion, hybrid retrieval over Neo4j + Qdrant, judge/hallucination/reflection agents, risk guardrails, war-room dashboard) — see [Live platform](#live-platform) below.
 
 ---
 
@@ -106,60 +67,92 @@ Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +3.8%). Quarter-Kel
 - Universe limited to markets still open 24h before *scheduled* close with clean YES/NO resolution; early-resolving and disputed markets are excluded.
 - 1¢ flat slippage approximates execution; thin books would fill worse than the last-trade price.
 - GDELT is rate-limited to uselessness from this network; evidence is Wikipedia-only (199/959 markets had relevant pinned events) plus the model's pre-cutoff knowledge.
-- Reproducing: `scripts/backtest.py` stages are cached and resumable — `collect → refresh → probe → predict → evaluate`. Full artifacts in `data/backtest/evaluation.json`.
 
 ---
 
 ## Forward test (live paper trading)
 
-The backtest's remaining blind spots — real spreads, executability, regime dependence — are covered by a forward paper-trading test running the **identical frozen system** against live markets:
+The backtest's remaining blind spots — real spreads, executability, regime dependence — are covered by a forward paper-trading test running the **identical frozen system** against live markets. It started 2026-06-10 and runs daily via cron.
 
 - **Pre-registered 2026-06-10** (from the 687-market train split): α=1.0, τ=0.08, 3–97¢ bounds, flat $100 paper stakes. Not retuned while the test runs.
 - **Fills at the real ask** from the live CLOB order book (stricter than the backtest's last-trade + 1¢), decision edge measured against the book mid.
-- **Two arms per market**: `replica` (wiki-events evidence only, exactly as backtested — tests whether the backtest generalizes) and `enhanced` (web search enabled, legitimate live — tests whether richer evidence adds edge).
+- **Two arms per market**: `replica` (wiki-events evidence only, exactly as backtested — tests whether the backtest generalizes) and `enhanced` (web search enabled, legitimate live — tests whether richer evidence adds edge). Early signal: the enhanced arm trades far less — current prices via web search keep it anchored to the market.
 - Every decision is logged at decision time (forecast, reasoning, book snapshot, fill) to `data/forward/decisions.jsonl`, including no-trades.
 - **Success bar** before any real capital: ~100 settled trades, positive P&L, cluster-bootstrap CI lower bound above −5%, replica arm consistent with its backtest CI.
 
 ```bash
-# daily scan + settlement (e.g. cron at 14:00 UTC)
-python scripts/forward_test.py scan
-python scripts/forward_test.py settle    # also prints the running report
+# daily (installed as a 9:00 cron job)
+python scripts/forward_test.py scan      # find, forecast, decide, log
+python scripts/forward_test.py settle    # settle resolved positions
+python scripts/forward_test.py report    # running P&L per arm
 ```
 
 ---
 
-## Numbers
+## Reproducing the backtest
 
-### Retrieval
+No Docker, no API keys — every data source (Polymarket Gamma, CLOB price history, Wikipedia revisions) is free; synthesis runs through the Claude Code CLI (`claude -p`, pinned model).
 
-| Metric | Value |
-|--------|-------|
-| Retrieval strategies | 3 (vector, BM25, graph traversal) |
-| Fusion algorithm | Reciprocal Rank Fusion (k=60) |
-| Re-ranker | BGE-reranker-v2-m3 (cross-encoder) |
-| Embedding model | BAAI/bge-large-en-v1.5 (1024-dim) |
-| Claim verification threshold | 0.75 cosine similarity |
+```bash
+python3 -m venv .venv
+.venv/bin/pip install httpx structlog pydantic-settings numpy scipy aiosqlite pytest pytest-asyncio
 
-### Evaluation pipeline
+# stages are cached in data/backtest/ and resumable
+.venv/bin/python scripts/backtest.py collect --target 1000 --min-volume 20000 --skip-gdelt
+.venv/bin/python scripts/backtest.py refresh                 # pinned wiki revisions, event ids, 3h price tolerance
+.venv/bin/python scripts/backtest.py probe                   # parametric-leakage probe (run before trusting results)
+.venv/bin/python scripts/backtest.py predict --concurrency 8 # claude -p forecasts, resumable
+.venv/bin/python scripts/backtest.py evaluate                # grid on train, frozen eval on test
 
-| Check | Model | Max tokens |
-|-------|-------|-----------|
-| LLM judge (4-dim scoring) | claude-3-5-haiku | 1,024 |
-| Hallucination — claim extraction | claude-3-5-haiku | 1,024 |
-| Hallucination — contradiction check | claude-3-5-haiku | 1,024 |
-| Reflection / bias detection | claude-3-5-haiku | 512 |
-| Research synthesis | claude-3-5-haiku | 1,024 |
+.venv/bin/python -m pytest tests/unit/test_pnl.py tests/unit/test_time_machine.py tests/unit/test_forward.py
+```
 
-Judge quality gates: groundedness ≥ 7/10, reasoning ≥ 6/10, evidence ≥ 5/10.
+Full artifacts: `data/backtest/evaluation.json` (per-trade detail), `data/backtest/probe.json`, `data/forward/decisions.jsonl`.
 
-### Model routing
+---
 
-The `ComplexityClassifier` (logistic regression, trained on 500 synthetic samples) routes ~80% of queries to the local stub and only sends ~20% to Claude — keeping API costs low.
+## Live platform
 
-| Route | Share | Latency |
-|-------|-------|---------|
-| Local stub | ~80% | <1ms |
-| Claude (haiku) | ~20% | ~500ms |
+Beyond the backtested core, the repo ships a continuously-running platform:
+
+1. **Ingest** — NewsAPI, Twitter/X, Reddit, government APIs (Congress, CourtListener), polling aggregators, YouTube/podcast audio (Whisper), chart images (vision)
+2. **Store** — chunks and embeds content into Qdrant (vectors) and extracts entities into Neo4j (knowledge graph)
+3. **Research** — a multi-agent system generates a structured thesis per market using hybrid retrieval (vector + BM25 + graph, RRF fusion, BGE re-ranking)
+4. **Evaluate** — an LLM judge scores theses on 4 dimensions (gates: groundedness ≥ 7, reasoning ≥ 6, evidence ≥ 5); a hallucination detector verifies claims against sources at 0.75 cosine similarity
+5. **Reflect** — a self-critique step checks for anchoring, recency, and confirmation biases
+6. **Trade** — the Risk Agent enforces hard guardrails; the Portfolio Manager executes paper trades
+7. **Learn** — post-resolution post-mortems classify predictions as good-process vs lucky
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Ingestion Layer                       │
+│  News · Twitter · Reddit · Gov APIs · Audio · Vision    │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+          ┌─────────▼──────────┐
+          │   Knowledge Store  │
+          │  Neo4j (graph)     │
+          │  Qdrant (vectors)  │
+          └─────────┬──────────┘
+                    │
+     ┌──────────────▼──────────────┐
+     │     Hybrid Retrieval        │
+     │  Vector · BM25 · Graph      │
+     │  RRF Fusion · BGE Reranker  │
+     └──────────────┬──────────────┘
+                    │
+     ┌──────────────▼──────────────────────────┐
+     │            Agent Pipeline               │
+     │  Forecaster → Reflection → Judge        │
+     │  Hallucination Check → Risk → Trade     │
+     └──────────────┬──────────────────────────┘
+                    │
+     ┌──────────────▼──────────────┐
+     │       Observability         │
+     │  Prometheus · Grafana       │
+     │  LLM Tracer · SSE Dashboard │
+     └─────────────────────────────┘
+```
 
 ### Risk guardrails (hard limits)
 
@@ -170,116 +163,61 @@ The `ComplexityClassifier` (logistic regression, trained on 500 synthetic sample
 | Max risk on markets resolving within 24h | 5% of portfolio |
 | Stop-loss trigger | 50% loss on any position |
 
-### API cost (claude-3-5-haiku @ $0.80/1M input · $4.00/1M output)
-
-| Scale | Research cycles/day | Daily cost |
-|-------|-------------------|------------|
-| 10 markets | ~30 | ~$0.35 |
-| 50 markets | ~150 | ~$1.80 |
-| 200 markets | ~1,000 | ~$12 |
-| 500 markets | ~2,500 | ~$30 |
-
-### Ingestion schedule
-
-| Source | Interval |
-|--------|---------|
-| Polymarket markets | 60 seconds |
-| News (NewsAPI) | 15 minutes |
-| Reddit | 30 minutes |
-| Government APIs | 6 hours |
-| Polling aggregators | 12 hours |
-| Audio (Whisper) | Daily |
-| Twitter/X | Continuous streaming |
-
----
-
-## Tech stack
+### Tech stack
 
 | Layer | Tech |
 |-------|------|
+| Forecaster | `claude-fable-5` via Claude Code CLI (pinned, market-blind) |
+| Agent LLM (judge, hallucination, reflection) | claude-haiku-4-5 |
 | API | FastAPI + uvicorn |
 | Vector DB | Qdrant v1.9 |
 | Graph DB | Neo4j 5.19 (APOC) |
-| Embeddings | sentence-transformers (BGE large) |
-| LLM | Anthropic claude-3-5-haiku |
+| Embeddings | sentence-transformers (BAAI/bge-large-en-v1.5, 1024-dim) |
+| Retrieval | vector + BM25 + graph traversal, RRF fusion (k=60), BGE-reranker-v2-m3 |
+| Model routing | ComplexityClassifier (logistic regression) — local stub for simple queries, Claude for synthesis |
 | Fine-tuning | Modal + LoRA (Mistral 7B Instruct, r=16) |
-| Observability | Prometheus + Grafana |
-| Cache | Qdrant-backed semantic cache (1024-dim) |
-| Frontend | React (Vite) — real-time war room dashboard |
-| Streaming | Server-Sent Events (SSE) |
+| Observability | Prometheus + Grafana, SSE war-room dashboard (React/Vite) |
+| Cache | Qdrant-backed semantic cache + TTL tool cache |
 | A/B testing | SQLite + two-sample t-test (min 30 samples/variant) |
 | Containerization | Docker Compose |
 
----
-
-## Quickstart
+### Running the platform
 
 ```bash
-# 1. Copy env
-cp .env.example .env
-# Fill in: ORACLE_ANTHROPIC_API_KEY, ORACLE_NEWSAPI_KEY, etc.
-
-# 2. Start infrastructure
-docker compose up -d
-
-# 3. Install Python deps
+cp .env.example .env          # ORACLE_ANTHROPIC_API_KEY, ORACLE_NEWSAPI_KEY, ...
+docker compose up -d          # Neo4j, Qdrant, Prometheus, Grafana
 pip install uv && uv sync
-
-# 4. Run the API
 uvicorn oracle.api.app:app --reload
-
-# 5. Start the frontend
 cd frontend && npm install && npm run dev
 ```
 
-The API will be at `http://localhost:8000` and the war room dashboard at `http://localhost:5173`.
+API at `http://localhost:8000`, war-room dashboard at `http://localhost:5173`. Prometheus metrics at `/metrics` (`oracle_brier_score`, `oracle_accuracy_rate`, `oracle_portfolio_value`, `oracle_cost_per_prediction`, …).
 
----
-
-## Fine-tuning (optional)
-
-Oracle ships a Modal-based LoRA pipeline for fine-tuning Mistral 7B on prediction market reasoning:
-
-```bash
-# Generate training data from resolved markets
-python -m oracle.training.data_generator
-
-# Launch fine-tune on Modal (A10G GPU, ~2h)
-modal run src/oracle/training/modal_trainer.py
-```
-
-LoRA config: r=16, alpha=32, target modules: q/k/v/o projections, dropout=0.05.
-
----
-
-## Observability
-
-Prometheus metrics are exposed at `/metrics`. Key gauges:
-
-- `oracle_brier_score` — calibration quality (lower is better)
-- `oracle_accuracy_rate` — rolling prediction accuracy
-- `oracle_cache_hit_rate` — tool cache efficiency
-- `oracle_portfolio_value` — paper portfolio value
-- `oracle_cost_per_prediction` — USD cost histogram
-- `oracle_llm_latency_seconds` — per-model, per-agent latency
-
-The React war room streams live agent activity, trade decisions, and evaluation scores via SSE.
+Optional LoRA fine-tuning on resolved markets: `modal run src/oracle/training/modal_trainer.py` (A10G, ~2h; r=16, alpha=32, q/k/v/o projections).
 
 ---
 
 ## Project structure
 
 ```
+scripts/
+├── backtest.py      # time-machine backtest: collect → refresh → probe → predict → evaluate
+└── forward_test.py  # live paper trading: scan → settle → report (frozen params)
+
 src/oracle/
-├── agents/          # Research, Reflection, Quant, Risk, Portfolio agents
+├── agents/          # forecaster (market-blind, pinned), research, reflection, risk, portfolio
 ├── api/             # FastAPI app, routes, SSE streaming
 ├── cache/           # TTL + semantic cache (Qdrant-backed)
-├── evaluation/      # LLM judge, hallucination detector, calibration, post-mortems
-├── ingestion/       # News, Twitter, Reddit, audio, vision, gov scrapers
+├── evaluation/      # pnl (P&L sim, Kelly, cluster bootstrap), judge, hallucination, post-mortems
+├── ingestion/       # price_history (CLOB), wiki_events (revision-pinned), gdelt, news, social, gov
 ├── knowledge/       # Neo4j + Qdrant clients, embeddings
 ├── observability/   # Prometheus metrics, LLM tracer
-├── prompts/         # Prompt registry, A/B testing
-├── retrieval/       # Vector, BM25, graph search, RRF fusion, re-ranker
-├── routing/         # Complexity classifier → model routing
+├── prompts/         # prompt registry, A/B testing
+├── retrieval/       # vector, BM25, graph search, RRF fusion, re-ranker
+├── routing/         # complexity classifier → model routing
 └── training/        # Modal LoRA fine-tuning, synthetic data generator
+
+data/
+├── backtest/        # markets.jsonl, predictions.jsonl, evaluation.json, probe.json
+└── forward/         # decisions.jsonl (live paper-trading log)
 ```
