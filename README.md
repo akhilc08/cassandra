@@ -1,8 +1,8 @@
 # Cassandra
 
-Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra forecasts markets with a market-blind LLM, trades the disagreement against real prices, and measures itself with a leak-controlled backtest plus a live forward test — end to end, no human in the loop.
+Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra forecasts markets with a market-blind LLM, trades the disagreement against real prices, and measures itself with a leak-controlled backtest — end to end, no human in the loop.
 
-**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +8%…+55%, clear of zero) in a leak-controlled time-machine backtest against real market prices — now being confirmed by live paper trading.**
+**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +8%…+55%, clear of zero) in a leak-controlled time-machine backtest against real market prices.** Not yet confirmed by live forward testing — see [Known limitations](#known-limitations).
 
 ---
 
@@ -10,7 +10,7 @@ Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassan
 
 1. **Forecast (market-blind)** — a pinned LLM (`claude-fable-5`) estimates P(YES) from dated evidence and base rates, *without seeing the market price*. Shown the price, LLMs anchor to it within ±1¢ — which destroys the signal. Evidence comes from revision-pinned Wikipedia Current Events pages (plus web search in live mode).
 2. **Blend & decide** — the strategy layer shrinks the forecast toward the market (`p = α·p_model + (1−α)·p_market`) and buys the cheap side when the divergence exceeds a threshold τ. α and τ are tuned on a train split and frozen.
-3. **Verify** — every claim of edge is checked against real prices at decision time: a time-machine backtest over 959 resolved markets, and a forward paper-trading test on live order books.
+3. **Verify** — every claim of edge is checked against real prices at decision time via a time-machine backtest over 959 resolved markets.
 
 The repo also contains the larger always-on platform (multi-source ingestion, hybrid retrieval over Neo4j + Qdrant, judge/hallucination/reflection agents, risk guardrails, war-room dashboard) — see [Live platform](#live-platform) below.
 
@@ -62,30 +62,11 @@ Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +3.8%). Quarter-Kel
 
 ### Known limitations
 
-- The test window is one regime (May–Jun 2026); a single period can favor a long-shot book. Forward (paper-trading) confirmation is still the bar before real capital.
+- The test window is one regime (May–Jun 2026); a single period can favor a long-shot book. Forward (paper-trading) confirmation on live order books is still the bar before real capital, and has not yet been run — the backtest's blind spots (real spreads, executability, regime dependence) remain open.
 - Market universe filtered on **final** volume (post-T information) — selection, not leakage, but live deployment would select on volume-to-date.
 - Universe limited to markets still open 24h before *scheduled* close with clean YES/NO resolution; early-resolving and disputed markets are excluded.
 - 1¢ flat slippage approximates execution; thin books would fill worse than the last-trade price.
 - GDELT is rate-limited to uselessness from this network; evidence is Wikipedia-only (199/959 markets had relevant pinned events) plus the model's pre-cutoff knowledge.
-
----
-
-## Forward test (live paper trading)
-
-The backtest's remaining blind spots — real spreads, executability, regime dependence — are covered by a forward paper-trading test running the **identical frozen system** against live markets. It started 2026-06-10 and runs daily via cron.
-
-- **Pre-registered 2026-06-10** (from the 687-market train split): α=1.0, τ=0.08, 3–97¢ bounds, flat $100 paper stakes. Not retuned while the test runs.
-- **Fills at the real ask** from the live CLOB order book (stricter than the backtest's last-trade + 1¢), decision edge measured against the book mid.
-- **Two arms per market**: `replica` (wiki-events evidence only, exactly as backtested — tests whether the backtest generalizes) and `enhanced` (web search enabled, legitimate live — tests whether richer evidence adds edge). Early signal: the enhanced arm trades far less — current prices via web search keep it anchored to the market.
-- Every decision is logged at decision time (forecast, reasoning, book snapshot, fill) to `data/forward/decisions.jsonl`, including no-trades.
-- **Success bar** before any real capital: ~100 settled trades, positive P&L, cluster-bootstrap CI lower bound above −5%, replica arm consistent with its backtest CI.
-
-```bash
-# daily (installed as a 9:00 cron job)
-python scripts/forward_test.py scan      # find, forecast, decide, log
-python scripts/forward_test.py settle    # settle resolved positions
-python scripts/forward_test.py report    # running P&L per arm
-```
 
 ---
 
@@ -104,10 +85,10 @@ python3 -m venv .venv
 .venv/bin/python scripts/backtest.py predict --concurrency 8 # claude -p forecasts, resumable
 .venv/bin/python scripts/backtest.py evaluate                # grid on train, frozen eval on test
 
-.venv/bin/python -m pytest tests/unit/test_pnl.py tests/unit/test_time_machine.py tests/unit/test_forward.py
+.venv/bin/python -m pytest tests/unit/test_pnl.py tests/unit/test_time_machine.py
 ```
 
-Full artifacts: `data/backtest/evaluation.json` (per-trade detail), `data/backtest/probe.json`, `data/forward/decisions.jsonl`.
+Full artifacts: `data/backtest/evaluation.json` (per-trade detail), `data/backtest/probe.json`.
 
 ---
 
@@ -201,8 +182,7 @@ Optional LoRA fine-tuning on resolved markets: `modal run src/oracle/training/mo
 
 ```
 scripts/
-├── backtest.py      # time-machine backtest: collect → refresh → probe → predict → evaluate
-└── forward_test.py  # live paper trading: scan → settle → report (frozen params)
+└── backtest.py      # time-machine backtest: collect → refresh → probe → predict → evaluate
 
 src/oracle/
 ├── agents/          # forecaster (market-blind, pinned), research, reflection, risk, portfolio
@@ -218,6 +198,5 @@ src/oracle/
 └── training/        # Modal LoRA fine-tuning, synthetic data generator
 
 data/
-├── backtest/        # markets.jsonl, predictions.jsonl, evaluation.json, probe.json
-└── forward/         # decisions.jsonl (live paper-trading log)
+└── backtest/        # markets.jsonl, predictions.jsonl, evaluation.json, probe.json
 ```
