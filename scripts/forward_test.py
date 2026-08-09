@@ -120,10 +120,18 @@ def cluster_key(market: dict) -> str:
     events = _parse_json_field(market.get("events"))
     if events and isinstance(events[0], dict) and events[0].get("id"):
         return f"event:{events[0]['id']}"
-    slug = market_category(market) or str(market.get("id"))
+    # market_category returns the literal "other" rather than an empty string when
+    # a market has no category, so `x or fallback` never fires -- without this
+    # check every uncategorised market collapses into one giant "other" cluster,
+    # which both corrupts the bootstrap and (via the 2-per-cluster cap in
+    # fetch_live_candidates) silently throttles the scan to 2 such markets a day.
+    slug = market_category(market)
+    if not slug or slug == "other":
+        return f"market:{market.get('id')}"
     slug = re.sub(r"-(exact-score|more-markets|correct-score|total-goals|btts).*$", "", slug)
-    slug = re.sub(r"-above-on-.*$", "-above", slug)
-    slug = re.sub(r"-below-on-.*$", "-below", slug)
+    # Strike ladders appear both as `bitcoin-above-on-april-1` and with the strike
+    # embedded, `bitcoin-above-125000-on-august-9`. Collapse both to `bitcoin-above`.
+    slug = re.sub(r"-(above|below)(-[\d.]+)?-on-.*$", r"-\1", slug)
     return f"slug:{slug}"
 
 

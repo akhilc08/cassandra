@@ -398,6 +398,29 @@ class TestClusterKey:
         assert ft.cluster_key(sl) == "slug:bitcoin"
         assert ft.cluster_key(ev) != ft.cluster_key(sl)
 
+    def test_ladder_collapses_with_the_strike_embedded_in_the_slug(self):
+        # Real Polymarket ladders carry the strike between "above" and "on"
+        # (bitcoin-above-125000-on-august-9). An earlier regex only matched the
+        # bare `-above-on-` form, so real ladders would NOT have collapsed and
+        # the bootstrap CI would have been too narrow again — the exact defect
+        # cluster_key exists to prevent.
+        bare = {"id": "1", "category": "bitcoin-above-on-august-9"}
+        strike_a = {"id": "2", "category": "bitcoin-above-125000-on-august-9"}
+        strike_b = {"id": "3", "category": "bitcoin-above-130000-on-august-10"}
+        keys = {ft.cluster_key(m) for m in (bare, strike_a, strike_b)}
+        assert keys == {"slug:bitcoin-above"}
+
+    def test_uncategorised_markets_do_not_all_collapse_into_one_cluster(self):
+        # market_category() returns the literal "other", not "", for a market with
+        # no category. Treating that as a real slug merged every such market into
+        # a single cluster, corrupting the bootstrap and — via the 2-per-cluster
+        # cap in fetch_live_candidates — throttling the scan to 2 markets a day.
+        a = {"id": "901"}
+        b = {"id": "902"}
+        assert ft.cluster_key(a) != ft.cluster_key(b)
+        assert ft.cluster_key(a) == "market:901"
+        assert "other" not in ft.cluster_key(a)
+
 
 class TestParseResponse:
     def test_valid_response(self):
