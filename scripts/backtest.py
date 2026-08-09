@@ -53,6 +53,28 @@ GAMMA_API = "https://gamma-api.polymarket.com"
 DATA_DIR = Path(__file__).parent.parent / "data" / "backtest"
 MARKETS_FILE = DATA_DIR / "markets.jsonl"
 PREDICTIONS_FILE = DATA_DIR / "predictions.jsonl"
+
+
+def predictions_file(provider: str) -> Path:
+    """Per-provider prediction files.
+
+    The claude path keeps the original filename so the archived baseline stays
+    reproducible; a different provider must never append into it, or the two
+    models' forecasts silently interleave in one file.
+    """
+    if provider == "claude":
+        return PREDICTIONS_FILE
+    from oracle.agents.forecaster_openai import FORECAST_MODEL as OPENAI_MODEL
+    return DATA_DIR / f"predictions.{OPENAI_MODEL}.jsonl"
+
+
+def get_forecaster(provider: str):
+    """(forecast_fn, model_id) for the requested provider."""
+    if provider == "claude":
+        from oracle.agents.forecaster import FORECAST_MODEL as m, forecast as fn
+        return fn, m
+    from oracle.agents.forecaster_openai import FORECAST_MODEL as m, forecast as fn
+    return fn, m
 EVALUATION_FILE = DATA_DIR / "evaluation.json"
 
 # Markets a news-driven forecaster cannot trade: intraday price noise,
@@ -424,10 +446,18 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 
 async def stage_predict(args) -> None:
+    provider = getattr(args, "provider", "claude")
+    forecast_fn, model_id = get_forecaster(provider)
+    out_file = predictions_file(provider)
+
     markets = _load_jsonl(MARKETS_FILE)
-    done_ids = {r["market_id"] for r in _load_jsonl(PREDICTIONS_FILE)}
+    done_ids = {r["market_id"] for r in _load_jsonl(out_file)}
     todo = [m for m in markets if m["market_id"] not in done_ids]
-    print(f"{len(markets)} markets, {len(done_ids)} already predicted, {len(todo)} to go")
+    limit = getattr(args, "limit", 0)
+    if limit:
+        todo = todo[:limit]
+    print(f"{len(markets)} markets, {len(done_ids)} already predicted, {len(todo)} to go "
+          f"[provider={provider} model={model_id} → {out_file.name}]")
     if not todo:
         return
 
@@ -444,9 +474,9 @@ async def stage_predict(args) -> None:
                 world_events=m.get("wiki_events", []),
                 description=m["description"],
             )
-            result = await forecast(**kwargs)
+            result = await forecast_fn(**kwargs)
             if result.failed:
-                result = await forecast(**kwargs)
+                result = await forecast_fn(**kwargs)
         record = {"market_id": m["market_id"], **result.to_dict()}
         async with write_lock:
             out.write(json.dumps(record) + "\n")
@@ -454,16 +484,16 @@ async def stage_predict(args) -> None:
         delta = result.p_model - m["p_market_at_t"]
         print(f"  {m['question'][:55]:<55} mkt={m['p_market_at_t']:.2f} model={result.p_model:.2f} ({delta:+.2f})")
 
-    with PREDICTIONS_FILE.open("a") as out:
+    with out_file.open("a") as out:
         await asyncio.gather(*(predict_one(m, out) for m in todo))
-    print(f"\nPredictions appended → {PREDICTIONS_FILE}")
+    print(f"\nPredictions appended → {out_file}")
 
 
-def _join_bets(split_date: str) -> tuple[list[BetInput], list[BetInput]]:
+def _join_bets(split_date: str, provider: str = "claude") -> tuple[list[BetInput], list[BetInput]]:
     markets = {m["market_id"]: m for m in _load_jsonl(MARKETS_FILE)}
     train, test = [], []
     seen: set[str] = set()
-    for p in _load_jsonl(PREDICTIONS_FILE):
+    for p in _load_jsonl(predictions_file(provider)):
         m = markets.get(p["market_id"])
         if not m or p.get("failed") or p["market_id"] in seen:
             continue
@@ -494,8 +524,10 @@ def _print_report(name: str, r) -> None:
 
 
 async def stage_evaluate(args) -> None:
-    train, test = _join_bets(args.split_date)
-    print(f"Train: {len(train)} markets (close < {args.split_date}) | Test: {len(test)} markets")
+    provider = getattr(args, "provider", "claude")
+    train, test = _join_bets(args.split_date, provider)
+    print(f"Train: {len(train)} markets (close < {args.split_date}) | Test: {len(test)} markets "
+          f"[provider={provider}]")
     if not train or not test:
         print("Not enough data on one side of the split — run collect/predict first.")
         return
@@ -543,9 +575,10 @@ async def stage_evaluate(args) -> None:
         month_rows[month] = {"n": len(bs), "brier_blend": round(brier_blend, 4), "brier_market": round(brier_market, 4)}
         print(f"  {month}  n={len(bs):3d}  blend={brier_blend:.4f}  market={brier_market:.4f}  delta={brier_blend - brier_market:+.4f}")
 
+    _, model_id = get_forecaster(provider)
     output = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model": FORECAST_MODEL,
+        "model": model_id,
         "split_date": args.split_date,
         "n_train": len(train),
         "n_test": len(test),
@@ -560,8 +593,10 @@ async def stage_evaluate(args) -> None:
             "pure_model": pure.to_dict(),
         },
     }
-    EVALUATION_FILE.write_text(json.dumps(output, indent=2))
-    print(f"\nFull evaluation written → {EVALUATION_FILE}")
+    eval_file = (EVALUATION_FILE if provider == "claude"
+                 else DATA_DIR / f"evaluation.{model_id}.json")
+    eval_file.write_text(json.dumps(output, indent=2))
+    print(f"\nFull evaluation written → {eval_file}")
 
 
 def main() -> None:
@@ -577,7 +612,12 @@ def main() -> None:
     parser.add_argument("--min-duration-days", type=float, default=3.0)
     parser.add_argument("--news-lookback-days", type=int, default=10)
     parser.add_argument("--skip-gdelt", action="store_true", help="skip GDELT (rate-limit penalty box)")
-    parser.add_argument("--concurrency", type=int, default=4, help="parallel claude -p calls")
+    parser.add_argument("--concurrency", type=int, default=4, help="parallel forecaster calls")
+    parser.add_argument("--provider", choices=["claude", "openai"], default="claude",
+                        help="forecaster backend; openai writes to its own predictions/evaluation "
+                             "files so the archived claude baseline is never overwritten")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="predict: cap markets this run (0 = all); use for cheap smoke tests")
     args = parser.parse_args()
 
     async def run():

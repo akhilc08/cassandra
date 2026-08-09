@@ -1,0 +1,1287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cassandra forward test</title>
+<style>
+:root {
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --bg: oklch(0.982 0.002 250);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.968 0.003 250);
+  --surface-3: oklch(0.945 0.004 250);
+  --border: oklch(0.898 0.005 250);
+  --border-strong: oklch(0.815 0.008 250);
+  --ink: oklch(0.245 0.012 255);
+  --ink-2: oklch(0.455 0.011 255);
+  --ink-3: oklch(0.545 0.010 255);
+
+  --accent: oklch(0.520 0.150 258);
+  --accent-bg: oklch(0.955 0.022 258);
+  --accent-border: oklch(0.855 0.055 258);
+
+  --ok: oklch(0.505 0.125 152);
+  --ok-bg: oklch(0.960 0.030 152);
+  --ok-border: oklch(0.855 0.060 152);
+
+  --warn: oklch(0.520 0.115 72);
+  --warn-bg: oklch(0.962 0.045 82);
+  --warn-border: oklch(0.860 0.085 78);
+
+  --danger: oklch(0.505 0.190 27);
+  --danger-bg: oklch(0.958 0.032 27);
+  --danger-border: oklch(0.845 0.085 27);
+
+  --shadow-sm: 0 1px 2px oklch(0.2 0.01 255 / 0.05);
+  --shadow-md: 0 1px 3px oklch(0.2 0.01 255 / 0.07), 0 8px 24px oklch(0.2 0.01 255 / 0.05);
+
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-overlay: 20;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 170ms;
+
+  --cols: 16px 124px 104px 72px minmax(260px, 1fr) 96px 76px 76px 82px 50px 96px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.158 0.008 258);
+    --surface: oklch(0.194 0.009 258);
+    --surface-2: oklch(0.228 0.010 258);
+    --surface-3: oklch(0.262 0.011 258);
+    --border: oklch(0.305 0.012 258);
+    --border-strong: oklch(0.395 0.015 258);
+    --ink: oklch(0.945 0.004 258);
+    --ink-2: oklch(0.760 0.008 258);
+    --ink-3: oklch(0.660 0.009 258);
+
+    --accent: oklch(0.760 0.115 258);
+    --accent-bg: oklch(0.268 0.048 258);
+    --accent-border: oklch(0.400 0.075 258);
+
+    --ok: oklch(0.790 0.130 152);
+    --ok-bg: oklch(0.258 0.048 152);
+    --ok-border: oklch(0.390 0.070 152);
+
+    --warn: oklch(0.830 0.130 82);
+    --warn-bg: oklch(0.272 0.050 72);
+    --warn-border: oklch(0.410 0.075 72);
+
+    --danger: oklch(0.735 0.155 27);
+    --danger-bg: oklch(0.278 0.070 27);
+    --danger-border: oklch(0.430 0.105 27);
+
+    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.30);
+    --shadow-md: 0 1px 3px oklch(0 0 0 / 0.35), 0 8px 24px oklch(0 0 0 / 0.28);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.011em; text-wrap: balance; }
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.pos { color: var(--ok); }
+.neg { color: var(--danger); }
+.dim { color: var(--ink-3); }
+
+.wrap { max-width: 1360px; margin: 0 auto; padding: 22px 20px 72px; }
+@media (max-width: 640px) { .wrap { padding: 16px 12px 56px; } }
+
+/* ---------- masthead ---------- */
+.masthead {
+  display: flex; flex-wrap: wrap; align-items: flex-start;
+  gap: 16px; justify-content: space-between; margin-bottom: 16px;
+}
+.masthead h1 { font-size: 19px; }
+.masthead .sub { color: var(--ink-2); font-size: 13px; margin-top: 3px; }
+.mast-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
+.mast-meta b { color: var(--ink); font-weight: 500; }
+
+/* ---------- mode badge ---------- */
+.modebox {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface); padding: 9px 13px; box-shadow: var(--shadow-sm);
+}
+.modebox.is-shadow { background: var(--warn-bg); border-color: var(--warn-border); }
+.modebox.is-official { background: var(--accent-bg); border-color: var(--accent-border); }
+.modebox .tag {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.09em; padding: 4px 9px; border-radius: var(--r-sm);
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.modebox.is-shadow .tag { color: var(--warn); }
+.modebox.is-official .tag { color: var(--accent); }
+.modebox .expl { font-size: 12px; line-height: 1.35; max-width: 30ch; }
+.modebox.is-shadow .expl { color: var(--warn); }
+.modebox.is-official .expl { color: var(--accent); }
+
+/* ---------- staleness banner ---------- */
+.banner {
+  display: flex; gap: 13px; align-items: flex-start;
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface); padding: 15px 17px; margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.banner.ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+.banner.warn { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn); }
+.banner.error {
+  background: var(--danger-bg); border-color: var(--danger); color: var(--danger);
+  border-width: 2px; padding: 18px 20px;
+}
+.banner .dot {
+  width: 10px; height: 10px; border-radius: 50%; background: currentColor;
+  margin-top: 6px; flex: none;
+}
+.banner.error .dot { animation: pulse 2.1s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.banner .btxt { min-width: 0; }
+.banner .bhead { font-weight: 650; font-size: 15px; letter-spacing: -0.008em; }
+.banner.error .bhead { font-size: 17px; }
+.banner .bsub { margin-top: 4px; font-size: 13px; line-height: 1.45; opacity: 0.92; }
+.banner .bnote {
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid currentColor;
+  font-size: 12.5px; opacity: 0.9;
+}
+
+/* ---------- panels ---------- */
+.panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+}
+.panel + .panel, .grid + .panel, .panel + .grid, .grid + .grid { margin-top: 18px; }
+.phead {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: baseline;
+  justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--border);
+}
+.phead h2 { font-size: 14px; }
+.phead .hint { font-size: 12.5px; color: var(--ink-3); }
+.pbody { padding: 15px 16px; }
+
+.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(316px, 1fr)); align-items: start; }
+
+/* ---------- status chips ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 5px 12px 5px 11px; cursor: pointer;
+  font-size: 12.5px; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.chip:hover { background: var(--surface-3); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip .c-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.chip.alarm { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); font-weight: 600; }
+.chip.alarm[aria-pressed="true"] { background: var(--danger); color: oklch(0.99 0 0); }
+
+.alarmline {
+  margin-top: 12px; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--danger-bg); border: 1px solid var(--danger-border);
+  color: var(--danger); font-size: 12.5px; line-height: 1.45;
+}
+
+/* ---------- stat readouts ---------- */
+/* Separators are drawn as cell shadows rather than grid gaps: an auto-fit row that
+   does not divide evenly would otherwise leave visibly empty gap-coloured cells. */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); background: var(--surface); border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--border); }
+.stat { padding: 10px 12px; box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border); }
+.stat .k { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.stat .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+.stat .v.sm { font-size: 13.5px; font-weight: 500; letter-spacing: 0; }
+
+.perf-empty { color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.baseline { border-style: dashed; background: var(--surface-2); }
+.baseline .phead { border-bottom-style: dashed; }
+.warnstrip {
+  font-size: 12.5px; line-height: 1.45; color: var(--warn);
+  background: var(--warn-bg); border: 1px solid var(--warn-border);
+  border-radius: var(--r-md); padding: 9px 11px; margin-bottom: 12px;
+}
+
+/* ---------- filters ---------- */
+.filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: 2px; }
+.seg button {
+  border: 0; background: transparent; padding: 4px 11px; border-radius: 5px;
+  cursor: pointer; font-size: 12.5px; color: var(--ink-2);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.seg button:hover { color: var(--ink); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm); }
+.search {
+  flex: 1 1 220px; min-width: 160px; padding: 6px 11px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2); color: var(--ink); font-size: 13px;
+}
+.search::placeholder { color: var(--ink-3); }
+.search:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--surface); }
+
+/* ---------- decision table ---------- */
+.tscroll { overflow-x: auto; }
+.trow-head, .drow > summary {
+  display: grid; grid-template-columns: var(--cols);
+  gap: 10px; align-items: center; min-width: 1080px; padding: 0 16px;
+}
+.trow-head {
+  padding-top: 9px; padding-bottom: 9px;
+  border-bottom: 1px solid var(--border); background: var(--surface-2);
+  font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3);
+}
+.drow { border-bottom: 1px solid var(--border); }
+.drow:last-child { border-bottom: 0; }
+.drow > summary {
+  padding-top: 9px; padding-bottom: 9px; cursor: pointer; list-style: none;
+  transition: background var(--dur) var(--ease);
+}
+.drow > summary::-webkit-details-marker { display: none; }
+.drow > summary::marker { content: ""; }
+.drow > summary:hover { background: var(--surface-2); }
+.drow > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.drow[open] > summary { background: var(--surface-2); }
+.chev { color: var(--ink-3); transition: transform var(--dur) var(--ease); font-size: 10px; }
+.drow[open] .chev { transform: rotate(90deg); }
+.q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-s { font-size: 12px; }
+
+.badge {
+  display: inline-block; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--ink-2); background: var(--surface);
+  white-space: nowrap;
+}
+.badge.open { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+.badge.settled { color: var(--ink); border-color: var(--border-strong); background: var(--surface-3); }
+.badge.no_trade { color: var(--ink-3); }
+.badge.forecast_failed { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
+.badge.void { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
+.badge.shadow { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
+.badge.official { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+
+/* ---------- expanded detail ---------- */
+.detail {
+  padding: 4px 16px 20px; min-width: 1080px;
+  background: var(--surface-2); border-top: 1px solid var(--border);
+}
+.detail .fullq { font-size: 14.5px; font-weight: 550; line-height: 1.42; margin: 14px 0 12px; max-width: 82ch; text-wrap: pretty; }
+.why {
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--surface); padding: 12px 14px; margin-bottom: 14px;
+}
+.why.trade { border-color: var(--accent-border); background: var(--accent-bg); }
+.why.no_trade { border-color: var(--border-strong); }
+.why.fail { border-color: var(--danger); background: var(--danger-bg); }
+.why.void { border-color: var(--warn-border); background: var(--warn-bg); }
+.why .wk { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+.why.trade .wk, .why.fail .wk, .why.void .wk { color: inherit; opacity: 0.72; }
+.why .wv { font-family: var(--font-mono); font-size: 13.5px; font-weight: 600; line-height: 1.45; }
+.why.trade .wv { color: var(--accent); }
+.why.fail .wv { color: var(--danger); }
+.why.void .wv { color: var(--warn); }
+.why .wn { margin-top: 7px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); max-width: 90ch; }
+.why.trade .wn, .why.fail .wn, .why.void .wn { color: inherit; opacity: 0.85; }
+
+.dcols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.dsec { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
+.dsec > h3 {
+  font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3);
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.kv { display: grid; grid-template-columns: minmax(120px, auto) 1fr; }
+.kv > div { padding: 5px 12px; border-bottom: 1px solid var(--border); font-size: 12.5px; min-width: 0; }
+.kv > div:nth-last-child(-n+2) { border-bottom: 0; }
+.kv .kk { color: var(--ink-3); }
+.kv .vv { font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.checks { display: flex; flex-direction: column; }
+.check { display: grid; grid-template-columns: 20px 1fr auto; gap: 9px; align-items: baseline; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.check:last-child { border-bottom: 0; }
+.check .mk { font-family: var(--font-mono); font-weight: 700; font-size: 12px; }
+.check.pass .mk { color: var(--ok); }
+.check.fail .mk { color: var(--danger); }
+.check.skip .mk, .check.na .mk { color: var(--ink-3); }
+.check.fail { background: var(--danger-bg); }
+.check.fail .cl { color: var(--danger); font-weight: 600; }
+.check .cv { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 12px; }
+.check.skip .cl, .check.skip .cv, .check.na .cl, .check.na .cv { color: var(--ink-3); }
+
+.prose {
+  margin: 0; padding: 11px 13px; font-family: var(--font-ui); font-size: 13px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow-y: auto;
+  color: var(--ink); text-wrap: pretty;
+}
+.prose.raw { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; color: var(--ink-2); max-height: 260px; }
+.subdet { border-top: 1px solid var(--border); }
+.subdet > summary { cursor: pointer; padding: 7px 12px; font-size: 12px; color: var(--ink-3); }
+.subdet > summary:hover { color: var(--ink); }
+.subdet > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.empty { padding: 40px 20px; text-align: center; color: var(--ink-2); }
+.empty h3 { font-size: 15px; color: var(--ink); margin-bottom: 7px; }
+.empty p { font-size: 13px; max-width: 60ch; margin: 0 auto; line-height: 1.55; }
+.empty code, .icode {
+  font-family: var(--font-mono); font-size: 12px; background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+}
+.empty .cmds { margin-top: 14px; display: inline-flex; flex-direction: column; gap: 5px; text-align: left; }
+
+.foot { margin-top: 26px; font-size: 12px; color: var(--ink-3); line-height: 1.55; max-width: 92ch; }
+.foot b { color: var(--ink-2); font-weight: 550; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  .banner.error .dot { opacity: 1; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div>
+      <h1>Cassandra forward test</h1>
+      <div class="sub">Live paper trading against frozen pre-registered parameters.</div>
+    </div>
+    <div id="modebox"></div>
+  </header>
+
+  <div id="banner"></div>
+  <div id="meta"></div>
+  <main id="main"></main>
+
+  <footer class="foot" id="foot"></footer>
+</div>
+
+<script>
+"use strict";
+
+/* Frozen pre-registered strategy. Mirrors data/baselines/claude-fable-5-2026-06-10
+   frozen_params. Used only to attribute WHICH RULE bound a decision when a record
+   carries no params block of its own. Never used to compute P&L, ROI or CIs:
+   those come from summary.json, computed in Python. */
+var FROZEN = {
+  alpha: 1.0, threshold: 0.08, slippage: 0.01,
+  min_price: 0.03, max_price: 0.97, max_divergence: 0.35,
+  evidence_gate: null, stake: 100.0, min_volume: 500000
+};
+var STRENGTH_RANK = { none: 0, weak: 1, moderate: 2, strong: 3 };
+
+var HOUR = 3600e3;
+var STALE_WARN_H = 36, STALE_ERR_H = 72;
+
+/* ---------------- helpers ---------------- */
+
+function el(tag, cls, text) {
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function num(v) { return typeof v === "number" && isFinite(v) ? v : null; }
+function f2(v) { return v === null || v === undefined ? "n/a" : Number(v).toFixed(2); }
+function f3(v) { return v === null || v === undefined ? "n/a" : Number(v).toFixed(3); }
+function signed(v, d) {
+  if (v === null || v === undefined || !isFinite(v)) return "n/a";
+  var s = Number(v).toFixed(d === undefined ? 3 : d);
+  return Number(v) >= 0 ? "+" + s : s;
+}
+function pct(v, d) {
+  if (v === null || v === undefined || !isFinite(v)) return "n/a";
+  return (v >= 0 ? "+" : "") + (v * 100).toFixed(d === undefined ? 1 : d) + "%";
+}
+function money(v) {
+  if (v === null || v === undefined || !isFinite(v)) return "n/a";
+  var s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (v < 0 ? "-$" : "$") + s;
+}
+function bigMoney(v) {
+  if (v === null || v === undefined || !isFinite(v)) return "n/a";
+  if (v >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B";
+  if (v >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M";
+  if (v >= 1e3) return "$" + Math.round(v / 1e3) + "k";
+  return "$" + Math.round(v);
+}
+/* Python isoformat() on an aware datetime yields "+00:00"; the spec sample uses "Z".
+   Both parse natively. A naive stamp (no zone) is assumed UTC rather than local. */
+function parseTS(s) {
+  if (!s || typeof s !== "string") return null;
+  var t = s.trim();
+  if (!t) return null;
+  if (!/(Z|[+-]\d{2}:?\d{2})$/.test(t)) t += "Z";
+  var d = new Date(t);
+  return isNaN(d.getTime()) ? null : d;
+}
+function fmtTS(d) {
+  if (!d) return "n/a";
+  var p = function (n) { return String(n).padStart(2, "0"); };
+  return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) +
+    " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + "Z";
+}
+function fmtShortTS(d) {
+  if (!d) return "n/a";
+  var p = function (n) { return String(n).padStart(2, "0"); };
+  return p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) + " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes());
+}
+function fmtAge(ms) {
+  if (ms === null || ms === undefined || !isFinite(ms)) return "unknown";
+  var neg = ms < 0;
+  var s = Math.abs(ms) / 1000;
+  var out;
+  if (s < 90) out = Math.round(s) + "s";
+  else if (s < 5400) out = Math.round(s / 60) + "m";
+  else if (s < 172800) out = Math.floor(s / 3600) + "h " + Math.round((s % 3600) / 60) + "m";
+  else out = Math.floor(s / 86400) + "d " + Math.round((s % 86400) / 3600) + "h";
+  return neg ? "in " + out : out + " ago";
+}
+
+/* ---------------- loading ---------------- */
+
+function fetchText(path) {
+  return fetch(path, { cache: "no-store" }).then(function (r) {
+    if (!r.ok) return { missing: true, status: r.status };
+    return r.text().then(function (t) { return { text: t }; });
+  }).catch(function (e) {
+    return { error: String((e && e.message) || e) };
+  });
+}
+
+function parseJSONL(text) {
+  var rows = [], bad = 0;
+  var lines = text.split("\n");
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    try {
+      var o = JSON.parse(line);
+      if (o && typeof o === "object") rows.push(o); else bad++;
+    } catch (e) { bad++; }
+  }
+  return { rows: rows, bad: bad };
+}
+
+/* ---------------- rule attribution ----------------
+   Mirrors decide_trade() in src/oracle/evaluation/pnl.py, including its short-circuit
+   order. Two details matter and are easy to get wrong:
+     1. max_divergence tests the RAW divergence |p_model - p_market|, while threshold
+        tests the blend edge alpha*(p_model - p_market). They coincide only at alpha=1
+        (which the frozen params are, and forward_test.py aborts on drift).
+     2. The stored `edge` field means different things by status: raw divergence for
+        no_trade rows, blend edge for open/settled rows. Attribution is therefore
+        recomputed from p_model and p_market_mid rather than read off that field. */
+
+function strategyOf(row) {
+  var p = (row && row.params) || {};
+  function g(k) { return typeof p[k] === "number" && isFinite(p[k]) ? p[k] : FROZEN[k]; }
+  return {
+    alpha: g("alpha"), threshold: g("threshold"), slippage: g("slippage"),
+    min_price: g("min_price"), max_price: g("max_price"),
+    max_divergence: g("max_divergence"), min_volume: g("min_volume"),
+    evidence_gate: (p.evidence_gate === undefined ? FROZEN.evidence_gate : p.evidence_gate)
+  };
+}
+
+function explain(row) {
+  var st = row.status;
+  if (st === "forecast_failed") {
+    return {
+      kind: "fail",
+      rule: "Forecast failed. No p_model was produced, so this market never reached the strategy layer.",
+      note: "A failed forecast is deliberately not given a sentinel probability. A default of 0.5 against a market at 0.20 would read as a 0.30 edge and manufacture a confident bogus trade.",
+      checks: []
+    };
+  }
+  if (st === "void") {
+    return {
+      kind: "void",
+      rule: "Market closed without a parseable YES/NO resolution. Position voided at zero P&L.",
+      note: "Void rows are excluded from the settled statistics in summary.json.",
+      checks: []
+    };
+  }
+
+  var s = strategyOf(row);
+  var pm = num(row.p_model), pk = num(row.p_market_mid), vol = num(row.volume);
+  if (pm === null || pk === null) {
+    return { kind: "unknown", rule: "Cannot attribute a rule: p_model or p_market_mid is missing from this record.", note: "", checks: [] };
+  }
+
+  var div = pm - pk;
+  var edge = s.alpha * div;
+  var checks = [];
+  var bound = null;
+
+  function add(label, value, state) { checks.push({ label: label, value: value, state: state }); }
+
+  /* Gate 0: the scan-time volume floor. Applied before decide_trade() sees the market. */
+  if (vol !== null && s.min_volume !== null && s.min_volume !== undefined) {
+    add("volume floor", bigMoney(vol) + (vol >= s.min_volume ? " ≥ " : " < ") + bigMoney(s.min_volume),
+      vol >= s.min_volume ? "pass" : "fail");
+    if (vol < s.min_volume && !bound) bound = "volume " + bigMoney(vol) + " below " + bigMoney(s.min_volume) + " floor";
+  }
+
+  /* Gate 1: price band. */
+  var inBand = pk >= s.min_price && pk <= s.max_price;
+  add("price band", f3(pk) + (inBand ? " inside " : " outside ") + f2(s.min_price) + "-" + f2(s.max_price),
+    bound ? "skip" : (inBand ? "pass" : "fail"));
+  if (!bound && !inBand) bound = "price " + f3(pk) + " outside " + f2(s.min_price) + "-" + f2(s.max_price);
+
+  /* Gate 2: evidence gate. Null in the frozen params, so inert. */
+  if (s.evidence_gate === null || s.evidence_gate === undefined) {
+    add("evidence gate", "off (inert)", "na");
+  } else {
+    var rank = STRENGTH_RANK[row.evidence_strength] || 0;
+    var need = STRENGTH_RANK[s.evidence_gate] || 0;
+    var okGate = rank >= need;
+    add("evidence gate", String(row.evidence_strength) + (okGate ? " ≥ " : " < ") + String(s.evidence_gate),
+      bound ? "skip" : (okGate ? "pass" : "fail"));
+    if (!bound && !okGate) bound = "evidence " + String(row.evidence_strength) + " below " + String(s.evidence_gate) + " gate";
+  }
+
+  /* Gate 3: divergence cap, on the RAW divergence. */
+  var underCap = Math.abs(div) <= s.max_divergence;
+  add("divergence cap", f2(Math.abs(div)) + (underCap ? " ≤ " : " > ") + f2(s.max_divergence),
+    bound ? "skip" : (underCap ? "pass" : "fail"));
+  if (!bound && !underCap) {
+    bound = (s.alpha === 1 ? "edge " : "divergence ") + f2(Math.abs(div)) + " > " + f2(s.max_divergence) + " divergence cap";
+  }
+
+  /* Gate 4: edge threshold, on the alpha-scaled blend edge. */
+  var overThr = Math.abs(edge) >= s.threshold;
+  add("edge threshold", f2(Math.abs(edge)) + (overThr ? " ≥ " : " < ") + f2(s.threshold),
+    bound ? "skip" : (overThr ? "pass" : "fail"));
+  if (!bound && !overThr) bound = "edge " + f2(Math.abs(edge)) + " < " + f2(s.threshold) + " threshold";
+
+  /* Gate 5: entry cost sanity. Unreachable under the frozen band plus slippage,
+     but decide_trade() checks it, so it is shown for completeness. */
+  var side = edge > 0 ? "yes" : "no";
+  var cost = (side === "yes" ? pk : 1 - pk) + s.slippage;
+  var costOK = cost < 1 && cost > 0;
+  add("entry cost", f3(cost) + (costOK ? " inside (0,1)" : " outside (0,1)"),
+    bound ? "skip" : (costOK ? "pass" : "fail"));
+  if (!bound && !costOK) bound = "entry cost " + f3(cost) + " outside (0,1)";
+
+  if (bound) {
+    return {
+      kind: "no_trade",
+      rule: bound,
+      note: "Every earlier gate passed. Gates below the binding one were never evaluated: decide_trade() returns on the first failure.",
+      checks: checks
+    };
+  }
+
+  add("direction", "p_model " + (div > 0 ? ">" : "<") + " p_market, buy " + side.toUpperCase(), "pass");
+  return {
+    kind: "trade",
+    rule: "edge " + signed(edge, 2) + ": |" + f2(Math.abs(edge)) + "| ≥ " + f2(s.threshold) +
+      " threshold, ≤ " + f2(s.max_divergence) + " cap, price " + f3(pk) + " inside " +
+      f2(s.min_price) + "-" + f2(s.max_price) + ". p_model " + f3(pm) + (div > 0 ? " > " : " < ") +
+      "p_market " + f3(pk) + ", so buy " + side.toUpperCase() + ".",
+    note: "",
+    checks: checks
+  };
+}
+
+/* Integrity check: the stored edge should equal the recomputed one. */
+function edgeMismatch(row) {
+  var stored = num(row.edge);
+  if (stored === null) return null;
+  var s = strategyOf(row), pm = num(row.p_model), pk = num(row.p_market_mid);
+  if (pm === null || pk === null) return null;
+  var expect = (row.status === "no_trade") ? (pm - pk) : s.alpha * (pm - pk);
+  return Math.abs(expect - stored) > 1e-6 ? expect : null;
+}
+
+/* ---------------- render: mode, banner, meta ---------------- */
+
+function renderMode(summary) {
+  var host = document.getElementById("modebox");
+  host.textContent = "";
+  var mode = (summary && summary.mode) || null;
+  var box = el("div", "modebox" + (mode === "official" ? " is-official" : mode === "shadow" ? " is-shadow" : ""));
+  box.appendChild(el("span", "tag", mode ? String(mode).toUpperCase() : "MODE UNKNOWN"));
+  box.appendChild(el("span", "expl",
+    mode === "official"
+      ? "The pre-registered test. These decisions count."
+      : mode === "shadow"
+        ? "Not the pre-registered test. Off-distribution, not counted."
+        : "summary.json did not report a mode. Treat every number below as unverified."));
+  host.appendChild(box);
+}
+
+function stalenessOf(generatedAt, now) {
+  var d = parseTS(generatedAt);
+  if (!d) return { level: "error", age: null, date: null };
+  var age = now - d.getTime();
+  var h = age / HOUR;
+  return { level: h > STALE_ERR_H ? "error" : h > STALE_WARN_H ? "warn" : "ok", age: age, date: d };
+}
+
+function renderBanner(summary, summaryLoad, decisions, now) {
+  var host = document.getElementById("banner");
+  host.textContent = "";
+
+  var b, head, sub;
+  if (!summary) {
+    b = "error";
+    head = "No summary.json. The pipeline's health cannot be verified.";
+    sub = summaryLoad && summaryLoad.error
+      ? "Fetch failed: " + summaryLoad.error
+      : "Expected at ./summary.json, written by `forward_test.py report`. Until it exists there is no freshness signal at all.";
+  } else {
+    var s = stalenessOf(summary.generated_at, now);
+    if (s.level === "error") {
+      b = "error";
+      head = s.date
+        ? "Report is " + fmtAge(s.age) + ". The pipeline may be dead."
+        : "summary.json has no readable generated_at. The pipeline may be dead.";
+      sub = "Nothing has written summary.json in over " + STALE_ERR_H + " hours. Check the cron job and the scan logs now. " +
+        "v1 ran for seven weeks in exactly this state while its report still looked healthy.";
+    } else if (s.level === "warn") {
+      b = "warn";
+      head = "Report is " + fmtAge(s.age) + ". Getting stale.";
+      sub = "Past the " + STALE_WARN_H + "h mark. Not yet fatal, but if it crosses " + STALE_ERR_H + "h assume the job stopped running.";
+    } else {
+      b = "ok";
+      head = "Report is fresh, written " + fmtAge(s.age) + ".";
+      sub = "Last report run " + fmtTS(s.date) + ". Under the " + STALE_WARN_H + "h threshold.";
+    }
+  }
+
+  var banner = el("div", "banner " + b);
+  banner.setAttribute("role", b === "ok" ? "status" : "alert");
+  banner.appendChild(el("span", "dot"));
+  var txt = el("div", "btxt");
+  txt.appendChild(el("div", "bhead", head));
+  txt.appendChild(el("div", "bsub", sub));
+
+  /* A fresh generated_at only proves `report` ran. It does not prove `scan` is still
+     logging. That gap is exactly how v1 died, so surface the decision age too. */
+  if (summary) {
+    var lastTS = summary.last_decision_ts;
+    if (!lastTS && decisions.length) {
+      for (var i = 0; i < decisions.length; i++) {
+        var t = decisions[i].ts_decision;
+        if (t && (!lastTS || t > lastTS)) lastTS = t;
+      }
+    }
+    var ld = parseTS(lastTS);
+    var note;
+    if (!ld) {
+      note = "No decision has ever been logged. A fresh report proves `report` ran, not that `scan` is working. " +
+        "At the " + bigMoney(summary.min_volume) + " volume floor a scan with no candidates logs nothing and exits 0, so this can be legitimate. Confirm against the scan logs.";
+    } else {
+      var lh = (now - ld.getTime()) / HOUR;
+      note = "Last decision logged " + fmtAge(now - ld.getTime()) + " (" + fmtTS(ld) + ").";
+      if (lh > STALE_ERR_H) {
+        note += " That is far older than the report itself. Either no market cleared the " +
+          bigMoney(summary.min_volume) + " floor, or scan is failing silently.";
+      }
+    }
+    txt.appendChild(el("div", "bnote", note));
+  }
+
+  banner.appendChild(txt);
+  host.appendChild(banner);
+}
+
+function renderMeta(summary, now) {
+  var host = document.getElementById("meta");
+  host.textContent = "";
+  if (!summary) return;
+  var s = stalenessOf(summary.generated_at, now);
+  var m = el("div", "mast-meta");
+  function item(k, v) {
+    var d = el("div");
+    d.appendChild(document.createTextNode(k + " "));
+    d.appendChild(el("b", "mono", v));
+    m.appendChild(d);
+  }
+  item("model", summary.model || "n/a");
+  item("volume floor", summary.min_volume ? bigMoney(summary.min_volume) : "n/a");
+  item("report generated", s.date ? fmtTS(s.date) : "n/a");
+  item("decisions logged", summary.n_decisions === undefined ? "n/a" : String(summary.n_decisions));
+  m.style.margin = "-4px 0 18px";
+  host.appendChild(m);
+}
+
+/* ---------------- render: pipeline state ---------------- */
+
+var STATUSES = ["open", "no_trade", "forecast_failed", "settled", "void"];
+
+function renderPipeline(main, summary, decisions, jsonlLoad, state, rerender) {
+  var counts = {};
+  STATUSES.forEach(function (s) { counts[s] = 0; });
+  var other = {};
+  decisions.forEach(function (d) {
+    var s = d.status || "?";
+    if (counts[s] !== undefined) counts[s]++;
+    else other[s] = (other[s] || 0) + 1;
+  });
+
+  var panel = el("section", "panel");
+  var head = el("div", "phead");
+  head.appendChild(el("h2", null, "Pipeline state"));
+  var lastRun = summary ? parseTS(summary.generated_at) : null;
+  head.appendChild(el("div", "hint", "last report run " + (lastRun ? fmtTS(lastRun) : "n/a") +
+    "  ·  " + decisions.length + " decision" + (decisions.length === 1 ? "" : "s") + " in decisions.jsonl"));
+  panel.appendChild(head);
+
+  var body = el("div", "pbody");
+
+  if (jsonlLoad && jsonlLoad.missing) {
+    body.appendChild(el("div", "warnstrip", "decisions.jsonl is not present (HTTP " + jsonlLoad.status + "). No decision has been written yet, or the file is not being served next to this page."));
+  } else if (jsonlLoad && jsonlLoad.error) {
+    body.appendChild(el("div", "warnstrip", "decisions.jsonl could not be read: " + jsonlLoad.error));
+  } else if (jsonlLoad && jsonlLoad.bad) {
+    body.appendChild(el("div", "warnstrip", jsonlLoad.bad + " line(s) in decisions.jsonl are not valid JSON and were skipped. The file is append-only, so a partial write is the usual cause."));
+  }
+
+  var chips = el("div", "chips");
+  var allBtn = el("button", "chip");
+  allBtn.type = "button";
+  allBtn.setAttribute("aria-pressed", String(state.status === "all"));
+  allBtn.appendChild(el("span", null, "all"));
+  allBtn.appendChild(el("span", "c-n", String(decisions.length)));
+  allBtn.addEventListener("click", function () { state.status = "all"; rerender(); });
+  chips.appendChild(allBtn);
+
+  var keys = STATUSES.concat(Object.keys(other));
+  keys.forEach(function (s) {
+    var n = counts[s] !== undefined ? counts[s] : other[s];
+    var alarm = s === "forecast_failed" && n > 0;
+    var btn = el("button", "chip" + (alarm ? " alarm" : ""));
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", String(state.status === s));
+    btn.appendChild(el("span", null, s));
+    btn.appendChild(el("span", "c-n", String(n)));
+    btn.addEventListener("click", function () { state.status = state.status === s ? "all" : s; rerender(); });
+    chips.appendChild(btn);
+  });
+  body.appendChild(chips);
+
+  if (counts.forecast_failed > 0) {
+    body.appendChild(el("div", "alarmline",
+      counts.forecast_failed + " forecast" + (counts.forecast_failed === 1 ? " has" : "s have") +
+      " failed. These markets never reached the strategy layer, so they are invisible in the P&L. " +
+      "v1 died this way: seven weeks of total forecast failure behind a report that still looked healthy. " +
+      "scan only exits non-zero when candidates were found and every single forecast failed, so a partial failure rate like this exits 0 and will not page anyone."));
+  }
+
+  /* summary.counts is authoritative for the last report run. A mismatch against the
+     file means scan has appended since report last ran. */
+  if (summary && summary.counts && Object.keys(summary.counts).length) {
+    var mismatch = false;
+    var allKeys = {};
+    Object.keys(summary.counts).forEach(function (k) { allKeys[k] = 1; });
+    keys.forEach(function (k) { allKeys[k] = 1; });
+    Object.keys(allKeys).forEach(function (k) {
+      var fromFile = counts[k] !== undefined ? counts[k] : (other[k] || 0);
+      if ((summary.counts[k] || 0) !== fromFile) mismatch = true;
+    });
+    if (mismatch) {
+      body.appendChild(el("div", "warnstrip",
+        "Counts above are read from decisions.jsonl and do not match summary.json, which recorded " +
+        Object.keys(summary.counts).map(function (k) { return k + " " + summary.counts[k]; }).join(", ") +
+        ". scan has appended decisions since report last ran. The performance figures below are as of the last report run."));
+    }
+  }
+
+  panel.appendChild(body);
+  main.appendChild(panel);
+}
+
+/* ---------------- render: performance ---------------- */
+
+function statBlock(items) {
+  var g = el("div", "stats");
+  items.forEach(function (it) {
+    var s = el("div", "stat");
+    s.appendChild(el("div", "k", it.k));
+    var v = el("div", "v" + (it.small ? " sm" : "") + (it.cls ? " " + it.cls : ""), it.v);
+    s.appendChild(v);
+    g.appendChild(s);
+  });
+  return g;
+}
+
+function renderPerf(main, summary) {
+  var grid = el("div", "grid");
+
+  ["official", "shadow"].forEach(function (mode) {
+    var blk = summary ? summary[mode] : null;
+    var panel = el("section", "panel");
+    var head = el("div", "phead");
+    head.appendChild(el("h2", null, mode === "official" ? "Official" : "Shadow"));
+    head.appendChild(el("div", "hint", mode === "official"
+      ? "pre-registered test, counted"
+      : "off-distribution, not counted"));
+    panel.appendChild(head);
+
+    var body = el("div", "pbody");
+    if (mode === "shadow") {
+      body.appendChild(el("div", "warnstrip",
+        "Shadow results are not the pre-registered test. They are off-distribution and do not count as evidence for or against the strategy."));
+    }
+    if (!blk) {
+      body.appendChild(el("p", "perf-empty", "No " + mode + " block in summary.json."));
+    } else if (!blk.n_settled) {
+      body.appendChild(el("p", "perf-empty",
+        "No settled trades yet, so there is nothing to measure. " +
+        (blk.n_trades ? blk.n_trades + " trade(s) recorded. " : "") +
+        "P&L, ROI and the 90% CI appear here only once forward_test.py report computes them in Python."));
+    } else {
+      var roiCls = num(blk.roi) === null ? "" : (blk.roi > 0 ? "pos" : blk.roi < 0 ? "neg" : "");
+      var pnlCls = num(blk.total_pnl) === null ? "" : (blk.total_pnl > 0 ? "pos" : blk.total_pnl < 0 ? "neg" : "");
+      body.appendChild(statBlock([
+        { k: "settled", v: String(blk.n_settled) },
+        { k: "P&L", v: money(num(blk.total_pnl)), cls: pnlCls },
+        { k: "ROI", v: pct(num(blk.roi)), cls: roiCls },
+        { k: "90% CI", v: num(blk.roi_ci_low) === null ? "n/a" : pct(blk.roi_ci_low) + " → " + pct(blk.roi_ci_high), small: true },
+        { k: "win rate", v: num(blk.win_rate) === null ? "n/a" : (blk.win_rate * 100).toFixed(1) + "%" },
+        { k: "clusters", v: blk.n_clusters === undefined ? "n/a" : String(blk.n_clusters) }
+      ]));
+      var extra = el("div", "stats");
+      extra.style.marginTop = "10px";
+      [
+        { k: "brier (blend)", v: num(blk.brier_blend) === null ? "n/a" : blk.brier_blend.toFixed(4) },
+        { k: "brier (market)", v: num(blk.brier_market) === null ? "n/a" : blk.brier_market.toFixed(4) },
+        { k: "max drawdown", v: money(num(blk.max_drawdown)) },
+        { k: "trades", v: blk.n_trades === undefined ? "n/a" : String(blk.n_trades) }
+      ].forEach(function (it) {
+        var s = el("div", "stat");
+        s.appendChild(el("div", "k", it.k));
+        s.appendChild(el("div", "v sm", it.v));
+        extra.appendChild(s);
+      });
+      body.appendChild(extra);
+      var note = "All figures above are read verbatim from summary.json, computed in Python against the frozen bootstrap contract.";
+      /* The clustering caveat only says something when correlated markets were collapsed. */
+      if (num(blk.n_clusters) !== null && blk.n_clusters < blk.n_settled) {
+        note += " The 90% CI is resampled over " + blk.n_clusters + " cluster" + (blk.n_clusters === 1 ? "" : "s") +
+          ", not " + blk.n_settled + " independent trades: correlated markets do not each count as fresh evidence.";
+      }
+      body.appendChild(el("p", "perf-empty", note));
+      body.lastChild.style.marginTop = "10px";
+    }
+    panel.appendChild(body);
+    grid.appendChild(panel);
+  });
+
+  main.appendChild(grid);
+
+  /* Baseline reference. Deliberately de-emphasised: different model, no volume floor. */
+  var b = summary && summary.baseline;
+  var bp = el("section", "panel baseline");
+  var bh = el("div", "phead");
+  bh.appendChild(el("h2", null, "Backtest baseline, for reference only"));
+  bh.appendChild(el("div", "hint", "different model, no volume floor, not a like-for-like target"));
+  bp.appendChild(bh);
+  var bb = el("div", "pbody");
+  if (!b) {
+    bb.appendChild(el("p", "perf-empty", "No baseline block in summary.json."));
+  } else {
+    bb.appendChild(statBlock([
+      { k: "test ROI", v: pct(num(b.test_roi)) },
+      { k: "90% CI", v: b.test_ci_90 ? pct(b.test_ci_90[0]) + " → " + pct(b.test_ci_90[1]) : "n/a", small: true },
+      { k: "source", v: b.source || "n/a", small: true }
+    ]));
+    var warn = el("div", "warnstrip", "This is claude-fable-5 on the historical test split with no volume floor. " +
+      "The forward test runs a different model at a $500k floor, on markets the backtest never saw. " +
+      "Do not read it as the number the forward test is expected to reproduce." +
+      (b.note ? " Recorded note: " + b.note : ""));
+    warn.style.margin = "12px 0 0";
+    bb.appendChild(warn);
+  }
+  bp.appendChild(bb);
+  main.appendChild(bp);
+}
+
+/* ---------------- render: decisions ---------------- */
+
+function kvSection(title, pairs) {
+  var s = el("div", "dsec");
+  s.appendChild(el("h3", null, title));
+  var kv = el("div", "kv");
+  pairs.forEach(function (p) {
+    kv.appendChild(el("div", "kk", p[0]));
+    var v = el("div", "vv", p[1]);
+    if (p[2]) v.classList.add(p[2]);
+    kv.appendChild(v);
+  });
+  s.appendChild(kv);
+  return s;
+}
+
+function buildDetail(row) {
+  var wrapEl = el("div", "detail");
+  var why = explain(row);
+  var s = strategyOf(row);
+
+  wrapEl.appendChild(el("div", "fullq", row.question || "(no question recorded)"));
+
+  var w = el("div", "why " + why.kind);
+  w.appendChild(el("div", "wk", why.kind === "trade" ? "Rule that fired" : "Binding rule"));
+  w.appendChild(el("div", "wv", why.rule));
+  if (why.note) w.appendChild(el("div", "wn", why.note));
+  wrapEl.appendChild(w);
+
+  var cols = el("div", "dcols");
+
+  /* forecast */
+  var pmodel = num(row.p_model), pmid = num(row.p_market_mid);
+  var div = (pmodel !== null && pmid !== null) ? pmodel - pmid : null;
+  var fc = [
+    ["p_model", pmodel === null ? "n/a" : f3(pmodel)],
+    ["p_market_mid", pmid === null ? "n/a" : f3(pmid)],
+    ["divergence", div === null ? "n/a" : signed(div)],
+    ["edge (α·div)", div === null ? "n/a" : signed(s.alpha * div)],
+    ["edge (stored)", num(row.edge) === null ? "n/a" : signed(row.edge)],
+    ["evidence_strength", row.evidence_strength || "n/a"],
+    ["wiki events given", row.n_wiki_events === undefined || row.n_wiki_events === null ? "n/a" : String(row.n_wiki_events)],
+    ["model", row.model || "n/a"]
+  ];
+  var mism = edgeMismatch(row);
+  if (mism !== null) fc.push(["stored vs recomputed", "MISMATCH, expected " + signed(mism), "neg"]);
+  cols.appendChild(kvSection("Forecast", fc));
+
+  /* gates */
+  var gsec = el("div", "dsec");
+  gsec.appendChild(el("h3", null, "Strategy gates, in evaluation order"));
+  if (why.checks.length) {
+    var list = el("div", "checks");
+    why.checks.forEach(function (c) {
+      var r = el("div", "check " + c.state);
+      r.appendChild(el("span", "mk", c.state === "pass" ? "✓" : c.state === "fail" ? "✗" : c.state === "na" ? "–" : "·"));
+      r.appendChild(el("span", "cl", c.label));
+      r.appendChild(el("span", "cv", c.value + (c.state === "skip" ? "  (not evaluated)" : "")));
+      list.appendChild(r);
+    });
+    gsec.appendChild(list);
+  } else {
+    var none = el("div", "check na");
+    none.appendChild(el("span", "mk", "–"));
+    none.appendChild(el("span", "cl", "not evaluated"));
+    none.appendChild(el("span", "cv", why.kind === "fail" ? "no forecast" : "n/a"));
+    gsec.appendChild(none);
+  }
+  cols.appendChild(gsec);
+
+  /* market */
+  var book = row.book || {};
+  var endD = parseTS(row.end_date);
+  cols.appendChild(kvSection("Market", [
+    ["category", row.category || "n/a"],
+    ["volume", num(row.volume) === null ? "n/a" : bigMoney(row.volume)],
+    ["ends", endD ? fmtTS(endD) : (row.end_date || "n/a")],
+    ["yes bid / ask", (num(book.yes_bid) === null ? "n/a" : f3(book.yes_bid)) + " / " + (num(book.yes_ask) === null ? "n/a" : f3(book.yes_ask))],
+    ["no bid / ask", (num(book.no_bid) === null ? "n/a" : f3(book.no_bid)) + " / " + (num(book.no_ask) === null ? "n/a" : f3(book.no_ask))],
+    ["market_id", row.market_id || "n/a"],
+    ["cluster_key", row.cluster_key || "n/a"],
+    ["decided", parseTS(row.ts_decision) ? fmtTS(parseTS(row.ts_decision)) : "n/a"]
+  ]));
+
+  /* position and settlement */
+  if (row.status === "open" || row.status === "settled") {
+    var ec = num(row.entry_cost), xc = num(row.executable_cost);
+    var pos = [
+      ["side", row.side ? String(row.side).toUpperCase() : "n/a"],
+      ["stake", money(num(row.stake))],
+      ["entry_cost (replica)", ec === null ? "n/a" : f3(ec)],
+      ["executable_cost (depth)", xc === null ? "n/a" : f3(xc)],
+      ["cost gap", (ec === null || xc === null) ? "n/a" : signed(xc - ec), (ec !== null && xc !== null && xc > ec) ? "neg" : ""],
+      ["executable_notional", num(row.executable_notional) === null ? "n/a" : money(row.executable_notional)]
+    ];
+    cols.appendChild(kvSection("Position", pos));
+
+    if (row.status === "settled") {
+      var pnl = num(row.pnl), pnlx = num(row.pnl_executable);
+      cols.appendChild(kvSection("Settlement", [
+        ["outcome", row.outcome_yes === null || row.outcome_yes === undefined ? "n/a" : (row.outcome_yes ? "YES" : "NO")],
+        ["won", row.won === undefined ? "n/a" : (row.won ? "yes" : "no"), row.won ? "pos" : "neg"],
+        ["pnl (replica)", money(pnl), pnl === null ? "" : (pnl > 0 ? "pos" : pnl < 0 ? "neg" : "")],
+        ["pnl (executable)", money(pnlx), pnlx === null ? "" : (pnlx > 0 ? "pos" : pnlx < 0 ? "neg" : "")],
+        ["pnl_per_dollar", num(row.pnl_per_dollar) === null ? "n/a" : signed(row.pnl_per_dollar)],
+        ["settled at", parseTS(row.ts_settled) ? fmtTS(parseTS(row.ts_settled)) : "n/a"]
+      ]));
+    }
+  }
+
+  wrapEl.appendChild(cols);
+
+  /* reasoning */
+  var rsec = el("div", "dsec");
+  rsec.style.marginTop = "14px";
+  rsec.appendChild(el("h3", null, "Model reasoning"));
+  rsec.appendChild(el("p", "prose", row.reasoning || "(no reasoning recorded)"));
+  if (row.raw_response) {
+    var sub = el("details", "subdet");
+    sub.appendChild(el("summary", null, "Raw model response"));
+    sub.appendChild(el("pre", "prose raw", row.raw_response));
+    rsec.appendChild(sub);
+  }
+  wrapEl.appendChild(rsec);
+
+  return wrapEl;
+}
+
+function buildRow(row) {
+  var d = el("details", "drow");
+  var sm = el("summary");
+
+  sm.appendChild(el("span", "chev", "▶"));
+  sm.appendChild(el("span", "cell-s mono dim", fmtShortTS(parseTS(row.ts_decision))));
+
+  var st = row.status || "?";
+  var b = el("span");
+  b.appendChild(el("span", "badge " + st, st));
+  sm.appendChild(b);
+
+  var mb = el("span");
+  mb.appendChild(el("span", "badge " + (row.mode || ""), row.mode || "?"));
+  sm.appendChild(mb);
+
+  var q = el("span", "q", row.question || "(no question)");
+  q.title = row.question || "";
+  sm.appendChild(q);
+
+  sm.appendChild(el("span", "cell-s dim q", row.category || ""));
+  sm.appendChild(el("span", "cell-s num", num(row.p_model) === null ? "–" : f3(row.p_model)));
+  sm.appendChild(el("span", "cell-s num dim", num(row.p_market_mid) === null ? "–" : f3(row.p_market_mid)));
+
+  var e = num(row.edge);
+  var ec = el("span", "cell-s num", e === null ? "–" : signed(e));
+  sm.appendChild(ec);
+
+  sm.appendChild(el("span", "cell-s mono", row.side ? String(row.side).toUpperCase() : "–"));
+
+  var pnl = num(row.pnl);
+  var pc = el("span", "cell-s num" + (pnl === null ? " dim" : pnl > 0 ? " pos" : pnl < 0 ? " neg" : ""),
+    pnl === null ? (st === "open" ? "open" : "–") : money(pnl));
+  sm.appendChild(pc);
+
+  d.appendChild(sm);
+
+  /* Detail is built on first expand: reasoning and raw_response are large. */
+  var built = false;
+  d.addEventListener("toggle", function () {
+    if (d.open && !built) { built = true; d.appendChild(buildDetail(row)); }
+  });
+  return d;
+}
+
+function renderDecisions(main, decisions, jsonlLoad, state, rerender) {
+  var panel = el("section", "panel");
+
+  var head = el("div", "phead");
+  head.appendChild(el("h2", null, "Decisions"));
+  head.appendChild(el("div", "hint", "newest first. expand any row for the rule that decided it"));
+  panel.appendChild(head);
+
+  var fbody = el("div", "pbody");
+  fbody.style.paddingBottom = "13px";
+  var filters = el("div", "filters");
+
+  var seg = el("div", "seg");
+  [["all", "all modes"], ["shadow", "shadow"], ["official", "official"]].forEach(function (m) {
+    var btn = el("button", null, m[1]);
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", String(state.mode === m[0]));
+    btn.addEventListener("click", function () { state.mode = m[0]; rerender(); });
+    seg.appendChild(btn);
+  });
+  filters.appendChild(seg);
+
+  var search = el("input", "search");
+  search.type = "search";
+  search.placeholder = "Search questions";
+  search.setAttribute("aria-label", "Search decision questions");
+  search.value = state.q;
+  search.addEventListener("input", function () {
+    var caret = search.selectionStart;
+    state.q = search.value;
+    rerender();
+    var next = document.querySelector(".search");
+    if (next) {
+      next.focus();
+      try { next.setSelectionRange(caret, caret); } catch (e) { /* type=search may reject */ }
+    }
+  });
+  filters.appendChild(search);
+
+  fbody.appendChild(filters);
+  panel.appendChild(fbody);
+
+  /* filter + sort: presentational only */
+  var q = state.q.trim().toLowerCase();
+  var rows = decisions.filter(function (d) {
+    if (state.status !== "all" && (d.status || "?") !== state.status) return false;
+    if (state.mode !== "all" && d.mode !== state.mode) return false;
+    if (q && String(d.question || "").toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+  rows.sort(function (a, b) { return String(b.ts_decision || "").localeCompare(String(a.ts_decision || "")); });
+
+  var active = (state.status !== "all") || (state.mode !== "all") || !!q;
+  if (active) {
+    var hint = el("div", "hint");
+    hint.style.cssText = "padding:0 16px 12px;font-size:12.5px;color:var(--ink-3)";
+    hint.textContent = "Showing " + rows.length + " of " + decisions.length + " decisions.";
+    panel.appendChild(hint);
+  }
+
+  if (!decisions.length) {
+    var e = el("div", "empty");
+    e.appendChild(el("h3", null, jsonlLoad && jsonlLoad.missing ? "No decisions.jsonl yet" : "No decisions logged yet"));
+    e.appendChild(el("p", null,
+      "This is the expected early state. At the $500k volume floor a scan that finds no candidate markets logs nothing and exits 0, " +
+      "so an empty file is not by itself a failure. It only becomes one if the report also goes stale, which the banner at the top of this page will say."));
+    var cmds = el("div", "cmds");
+    [".venv/bin/python scripts/forward_test.py scan",
+     ".venv/bin/python scripts/forward_test.py settle",
+     ".venv/bin/python scripts/forward_test.py report"].forEach(function (c) {
+      cmds.appendChild(el("code", "icode", c));
+    });
+    e.appendChild(cmds);
+    panel.appendChild(e);
+  } else if (!rows.length) {
+    var e2 = el("div", "empty");
+    e2.appendChild(el("h3", null, "No decisions match these filters"));
+    e2.appendChild(el("p", null, "Clear the status chip, mode, or search box to see all " + decisions.length + " decisions."));
+    panel.appendChild(e2);
+  } else {
+    var scroll = el("div", "tscroll");
+    var th = el("div", "trow-head");
+    ["", "decided (UTC)", "status", "mode", "question", "category", "p_model", "p_mkt", "edge", "side", "P&L"]
+      .forEach(function (h, i) {
+        var c = el("span", i >= 6 && i <= 8 || i === 10 ? "num" : null, h);
+        th.appendChild(c);
+      });
+    scroll.appendChild(th);
+    rows.forEach(function (r) { scroll.appendChild(buildRow(r)); });
+    panel.appendChild(scroll);
+  }
+
+  main.appendChild(panel);
+}
+
+/* ---------------- boot ---------------- */
+
+var STATE = { status: "all", mode: "all", q: "" };
+
+function renderFoot(summary) {
+  var f = document.getElementById("foot");
+  f.textContent = "";
+  var p1 = el("p");
+  p1.appendChild(el("b", null, "Frozen strategy. "));
+  p1.appendChild(document.createTextNode(
+    "Trade only when volume ≥ $500k and 0.03 ≤ p_market ≤ 0.97 and 0.08 ≤ |edge| ≤ 0.35. " +
+    "Buy YES when p_model > p_market, otherwise NO. Flat $100 stake. " +
+    "forward_test.py loads these from the archived baseline and aborts if any of them has drifted."));
+  f.appendChild(p1);
+  var p2 = el("p");
+  p2.style.marginTop = "7px";
+  p2.appendChild(el("b", null, "Where the numbers come from. "));
+  p2.appendChild(document.createTextNode(
+    "P&L, ROI, win rate and every confidence interval are computed in Python and read verbatim from summary.json. " +
+    "This page never recomputes them. It computes only counts, filters and the per-row rule attribution, " +
+    "which it derives from each record's own params block."));
+  f.appendChild(p2);
+  f.appendChild(el("p", null, "Rendered " + fmtTS(new Date()) + " from ./decisions.jsonl and ./summary.json.")).style.marginTop = "7px";
+}
+
+function boot() {
+  var main = document.getElementById("main");
+
+  Promise.all([fetchText("./summary.json"), fetchText("./decisions.jsonl")]).then(function (res) {
+    var sRes = res[0], dRes = res[1];
+    var now = Date.now();
+
+    var summary = null, summaryLoad = sRes;
+    if (sRes.text !== undefined) {
+      var t = sRes.text.trim();
+      if (t) {
+        try { summary = JSON.parse(t); }
+        catch (e) { summaryLoad = { error: "summary.json is not valid JSON: " + e.message }; }
+      } else {
+        summaryLoad = { error: "summary.json is empty." };
+      }
+    }
+    if (summary !== null && (typeof summary !== "object" || Array.isArray(summary))) {
+      summary = null;
+      summaryLoad = { error: "summary.json parsed but is not an object." };
+    }
+
+    var decisions = [], jsonlLoad = dRes;
+    if (dRes.text !== undefined) {
+      var parsed = parseJSONL(dRes.text);
+      decisions = parsed.rows;
+      jsonlLoad = { bad: parsed.bad };
+    }
+
+    /* Opened straight off disk, fetch is blocked by the file:// origin. Say so plainly
+       rather than showing a "pipeline is dead" banner caused by the browser. */
+    if (location.protocol === "file:" && sRes.error && dRes.error) {
+      document.getElementById("banner").textContent = "";
+      var b = el("div", "banner warn");
+      b.appendChild(el("span", "dot"));
+      var tx = el("div", "btxt");
+      tx.appendChild(el("div", "bhead", "Opened from the filesystem, so no data could be loaded."));
+      tx.appendChild(el("div", "bsub", "Browsers block fetch on file:// origins. Serve the directory over HTTP instead, for example: python3 -m http.server 8000 --directory dashboard"));
+      b.appendChild(tx);
+      document.getElementById("banner").appendChild(b);
+      renderMode(null);
+      renderFoot(null);
+      return;
+    }
+
+    function rerender() {
+      main.textContent = "";
+      renderPipeline(main, summary, decisions, jsonlLoad, STATE, rerender);
+      renderPerf(main, summary);
+      renderDecisions(main, decisions, jsonlLoad, STATE, rerender);
+    }
+
+    renderMode(summary);
+    renderBanner(summary, summaryLoad, decisions, now);
+    renderMeta(summary, now);
+    rerender();
+    renderFoot(summary);
+  }).catch(function (e) {
+    var main2 = document.getElementById("main");
+    main2.textContent = "";
+    var p = el("section", "panel");
+    var b = el("div", "empty");
+    b.appendChild(el("h3", null, "The dashboard failed to render"));
+    b.appendChild(el("p", null, String((e && e.stack) || e)));
+    p.appendChild(b);
+    main2.appendChild(p);
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

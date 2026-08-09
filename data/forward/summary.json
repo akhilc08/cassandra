@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-08-09T22:00:33.539111+00:00",
+  "mode": "shadow",
+  "model": "gpt-5.6-luna",
+  "min_volume": 500000.0,
+  "last_decision_ts": "",
+  "counts": {},
+  "n_decisions": 0,
+  "shadow": {
+    "mode": "shadow",
+    "n_settled": 0,
+    "n_trades": 0
+  },
+  "official": {
+    "mode": "official",
+    "n_settled": 0,
+    "n_trades": 0
+  },
+  "baseline": {
+    "source": "data/baselines/claude-fable-5-2026-06-10",
+    "test_roi": 0.3052,
+    "test_ci_90": [
+      0.0797,
+      0.554
+    ],
+    "note": "claude-fable-5, no volume floor; CI computed with inert clustering"
+  }
+}

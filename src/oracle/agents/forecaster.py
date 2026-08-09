@@ -1,10 +1,13 @@
 """Time-machine forecaster — calibrated P(YES) estimate as of a past timestamp.
 
-The forecaster sees only information available at prediction time T:
-the market price at T (a strong prior — prediction markets are mostly
-efficient), the recent price trend, and news headlines seen before T.
-Synthesis runs through the Claude Code CLI (`claude -p`), same as the
-live research agent.
+The forecaster sees only information available at prediction time T: dated world
+events and news headlines from before T. It is deliberately BLIND to the market
+price and price trend (see the comment on FORECAST_PROMPT below) — an earlier
+design supplied the price as a prior and the model simply anchored to it.
+Synthesis runs through the Claude Code CLI (`claude -p`).
+
+The OpenAI transport lives in `forecaster_openai.py` and reuses `build_prompt`
+and `Forecast` from here unchanged.
 """
 
 from __future__ import annotations

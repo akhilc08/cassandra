@@ -1,0 +1,160 @@
+# Cassandra forward paper-trading test — daily scan/settle/report + dashboard publish.
+#
+# HEADS UP: GitHub disables scheduled workflows in a repository that has had no
+# activity for 60 days (it emails the repo admin and the cron silently stops).
+# The commit-back step below is what keeps this workflow alive: every run that
+# produces a new decision or an updated summary pushes a commit, which resets
+# that 60-day inactivity clock. If the commit-back is ever removed, expect the
+# schedule to die two months later.
+#
+# Cron on GitHub is best-effort: runs drift 5-30+ minutes past the scheduled
+# time and are occasionally dropped entirely during peak load. Nothing here may
+# assume exactly-once or on-time execution — `scan` skips markets already
+# present in decisions.jsonl, `settle` only settles what has resolved, and
+# `report` rewrites summary.json from scratch, so extra runs, missed runs and
+# manual runs all converge to the same state.
+
+name: forward-test
+
+on:
+  schedule:
+    # 09:17 UTC daily. Off-the-hour minute: :00 is the busiest slot on GitHub's
+    # scheduler and the most likely to be delayed or dropped.
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+# One run at a time. Never cancel a run in flight: a cancelled run can leave the
+# repo with decisions written but not committed, and cancelling mid-push is how
+# you lose a day of decisions.
+concurrency:
+  group: forward-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  forward-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      # Gate the deploy job on the artifact actually existing.
+      artifact: ${{ steps.upload.outcome }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history: `git pull --rebase` in the commit-back step is
+          # unreliable against a depth-1 clone.
+          fetch-depth: 0
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          # Dependencies are pinned in this file rather than a requirements
+          # file, so this file is the correct cache key: editing the install
+          # list below invalidates the cache.
+          cache-dependency-path: .github/workflows/forward-test.yml
+
+      - name: Install dependencies
+        id: install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install httpx structlog pydantic-settings numpy scipy openai pytest
+
+      # scan exits 1 only when candidates were found and ZERO forecasts
+      # succeeded (the v1 failure mode). No candidates at the $500k volume floor
+      # is a normal day and exits 0. A non-zero exit here fails the job, which is
+      # the point — but settle/report below still run.
+      - name: Scan for new decisions
+        id: scan
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python scripts/forward_test.py scan
+
+      - name: Settle resolved markets
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python scripts/forward_test.py settle
+
+      - name: Rebuild summary
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python scripts/forward_test.py report
+
+      - name: Commit data files
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for f in data/forward/decisions.jsonl data/forward/summary.json; do
+            if [ -f "$f" ]; then git add -- "$f"; fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "No changes to data/forward — nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "forward test $(date -u +%Y-%m-%d)"
+
+          # Another run (or a human) may have pushed since checkout. Rebase onto
+          # the remote and retry once before giving up.
+          for attempt in 1 2; do
+            echo "push attempt $attempt"
+            git pull --rebase --autostash origin "$BRANCH" \
+              && git push origin "HEAD:$BRANCH" \
+              && exit 0
+            sleep 10
+          done
+          echo "Failed to push data/forward after 2 attempts." >&2
+          exit 1
+
+      # The dashboard fetches its data same-origin. Publish the data files at
+      # both data/forward/<name> and <name> so the page works whichever relative
+      # path it asks for.
+      - name: Assemble publish directory
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site/data/forward
+          cp dashboard/index.html _site/index.html
+          # decisions.jsonl does not exist until the first decision is written;
+          # publish an empty file so the dashboard gets a 200, not a 404.
+          touch data/forward/decisions.jsonl
+          for f in decisions.jsonl summary.json; do
+            cp "data/forward/$f" "_site/data/forward/$f"
+            cp "data/forward/$f" "_site/$f"
+          done
+          ls -R _site
+
+      - name: Upload Pages artifact
+        id: upload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: forward-test
+    # Runs even when the scan failed: a summary that records the failure is
+    # exactly what the dashboard should be showing. Skipped only if there is no
+    # artifact to deploy.
+    if: ${{ !cancelled() && needs.forward-test.outputs.artifact == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
