@@ -2,7 +2,7 @@
 
 Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra forecasts markets with a market-blind LLM, trades the disagreement against real prices, and measures itself with a leak-controlled backtest — end to end, no human in the loop.
 
-**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +8%…+55%, clear of zero) in a leak-controlled time-machine backtest against real market prices.** Not yet confirmed by live forward testing — see [Known limitations](#known-limitations).
+**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +5.1%…+56.3%, clear of zero) in a leak-controlled time-machine backtest against real market prices.** Not yet confirmed by live forward testing — see [Known limitations](#known-limitations).
 
 ---
 
@@ -43,13 +43,28 @@ Strategy: blend `p = α·p_model + (1−α)·p_market`, buy the cheap side when 
 | Trades | 144 | 272 | 46 | 192 |
 | P&L (flat $100) | **+$4,395** | +$2,059 | −$118 | +$3,877 |
 | ROI | **+30.5%** | +7.6% | −2.6% | +20.2% |
-| 90% CI (per-trade ROI) | **+8.0% … +55.4%** | −6.5% … +22.1% | −9.5% … +2.6% | +1.0% … +42.3% |
+| 90% CI (event-cluster) | **+5.1% … +56.3%** | −4.6% … +18.0% | −10.1% … +2.4% | −0.6% … +44.5% |
 | Win rate | 45.1% | 54.4% | 93.5% | 42.7% |
 | Max drawdown | $1,170 | $2,011 | $174 | $1,670 |
 
-Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +3.8%). Quarter-Kelly compounding on test: $1,000 → $4,048.
+Train (in-sample): +$6,760 on 342 trades (+19.8% ROI, CI low +2.9%). Quarter-Kelly compounding on test: $1,000 → $4,048.
 
-**The strategy's CI excludes zero** and its lower bound (+8.0%) clears every baseline's mean. Mechanical effects don't explain it: always-NO made +7.6% (CI spans zero) and buying favorites *lost* money in this period.
+**The strategy is the only variant whose CI excludes zero.** Mechanical effects don't
+explain the result: always-NO made +7.6% but its CI spans zero, buying favorites *lost*
+money, and the pure-model rule (+20.2%) also spans zero once correlated markets are
+clustered properly.
+
+> **CI correction (2026-08-10).** Earlier versions of this table reported
+> **+8.0% … +55.4%**, from a bootstrap that clustered on the stored `event_id`. That
+> field equals `market_id` for all 959 collected markets, so the "cluster bootstrap"
+> resampled 959 clusters over 959 markets and was effectively per-trade — ten
+> correlated "BTC below strike" bets and the several markets on one football match
+> each counted as independent. Re-running with keys derived from the event slug
+> (`--cluster derived`) gives the wider, honest interval above. Point estimates are
+> unchanged; only the precision was overstated. The affected baseline claim (that the
+> lower bound cleared every baseline's mean) has been removed — at +5.1% it does not
+> clear always-NO's +7.6% point estimate. Reproduce either with
+> `scripts/backtest.py evaluate --cluster {stored,derived}`.
 
 ### Honest read of the numbers
 

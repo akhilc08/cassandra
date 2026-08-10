@@ -18,17 +18,31 @@ train/test split at `2026-05-01`.
 | staked | $34,200 | $14,400 |
 | P&L | +$6,760.14 | **+$4,394.90** |
 | ROI | +19.77% | **+30.52%** |
-| 90% ROI CI (cluster bootstrap) | — | **+7.97% … +55.40%** |
+| 90% ROI CI (as archived) | — | **+7.97% … +55.40%** |
+| 90% ROI CI (corrected, event-clustered) | — | **+5.14% … +56.29%** |
 | win rate | 43.57% | 45.14% |
 | avg edge taken | 17.86% | 17.99% |
 | max drawdown | $1,845.74 | $1,170.40 |
 | Brier (blend) | 0.2687 | 0.2616 |
 | Brier (market) | 0.2047 | 0.2170 |
 
-The test-split CI lower bound is clear of zero. Note the forecaster is *worse
-calibrated than the market overall* (Brier 0.2616 vs 0.2170) — the edge comes from
-selective disagreement on the subset it trades, not from beating the market
-everywhere.
+The test-split CI lower bound is clear of zero under both clusterings. Note the
+forecaster is *worse calibrated than the market overall* (Brier 0.2616 vs 0.2170) —
+the edge comes from selective disagreement on the subset it trades, not from beating
+the market everywhere.
+
+**On the two CIs.** `evaluation.json` in this directory contains the archived
+`+7.97% … +55.40%`, and that is left untouched — it is the number that was published.
+It is, however, **too narrow**: the bootstrap clusters on `event_id`, and the collect
+stage stored `event_id == market_id` for all 959 rows, so it resampled 959 clusters
+over 959 markets and was effectively per-trade. Ten correlated "BTC below strike" bets
+counted as ten independent observations. Recomputing with keys derived from the event
+slug gives `+5.14% … +56.29%`. Point estimates are unaffected.
+
+```bash
+scripts/backtest.py evaluate --cluster stored    # reproduces evaluation.json exactly
+scripts/backtest.py evaluate --cluster derived   # -> data/backtest/evaluation.derived.json
+```
 
 ## Frozen parameters
 

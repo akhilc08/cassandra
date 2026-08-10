@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-09T22:00:33.539111+00:00",
+  "generated_at": "2026-08-10T17:51:48.622015+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 500000.0,
@@ -20,9 +20,9 @@
     "source": "data/baselines/claude-fable-5-2026-06-10",
     "test_roi": 0.3052,
     "test_ci_90": [
-      0.0797,
-      0.554
+      0.0514,
+      0.5629
     ],
-    "note": "claude-fable-5, no volume floor; CI computed with inert clustering"
+    "note": "claude-fable-5, no volume floor, event-clustered CI. A DIFFERENT model and a different universe than this test \u2014 reference only, not a like-for-like target."
   }
 }

@@ -9,7 +9,8 @@ Methodology:
     trader would actually have paid), NOT the settlement price.
   - Evidence = GDELT headlines seen strictly before T. No NewsAPI, no
     undated news, no lookahead.
-  - Forecast = `claude -p` with the market price as an explicit prior.
+  - Forecast = an LLM that is BLIND to the market price (shown it, models
+    anchor to it); shrinkage toward the market happens in the strategy layer.
   - P&L: blend/threshold strategy tuned on the train window (closes before
     --split-date), frozen and evaluated out-of-sample on the test window.
 
@@ -26,6 +27,7 @@ import argparse
 import asyncio
 import json
 import random
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -146,6 +148,31 @@ def market_category(market: dict) -> str:
             if v:
                 return str(v)[:40]
     return str(market.get("category") or "other")[:40]
+
+
+def cluster_key(market: dict) -> str:
+    """Stable grouping key for the bootstrap, for both live Gamma payloads and
+    stored backtest records.
+
+    The 959-market collect stored event_id == market_id for every row, so the
+    "cluster bootstrap" resampled 959 clusters over 959 markets and its CI was
+    too narrow: ten correlated "BTC below strike" bets, and the several markets
+    on a single football match, each counted as independent observations.
+    """
+    events = _parse_json_field(market.get("events"))
+    if events and isinstance(events[0], dict) and events[0].get("id"):
+        return f"event:{events[0]['id']}"
+    # market_category returns the literal "other" rather than "" when a market has
+    # no category, so `x or fallback` never fires -- without this check every
+    # uncategorised market collapses into one giant cluster.
+    slug = market_category(market)
+    if not slug or slug == "other":
+        return f"market:{market.get('id') or market.get('market_id')}"
+    slug = re.sub(r"-(exact-score|more-markets|correct-score|total-goals|btts).*$", "", slug)
+    # Ladders appear as `bitcoin-above-on-april-1` and with the strike embedded,
+    # `bitcoin-above-125000-on-august-9`. Collapse both to `bitcoin-above`.
+    slug = re.sub(r"-(above|below)(-[\d.]+)?-on-.*$", r"-\1", slug)
+    return f"slug:{slug}"
 
 
 async def fetch_candidate_markets(
@@ -489,7 +516,13 @@ async def stage_predict(args) -> None:
     print(f"\nPredictions appended → {out_file}")
 
 
-def _join_bets(split_date: str, provider: str = "claude") -> tuple[list[BetInput], list[BetInput]]:
+def _join_bets(
+    split_date: str, provider: str = "claude", cluster: str = "stored",
+) -> tuple[list[BetInput], list[BetInput]]:
+    """cluster='stored' reproduces the published result exactly (event_id as
+    collected, which equals market_id for all 959 rows and makes the bootstrap
+    effectively per-trade). cluster='derived' groups correlated markets properly
+    and yields the honest, wider CI."""
     markets = {m["market_id"]: m for m in _load_jsonl(MARKETS_FILE)}
     train, test = [], []
     seen: set[str] = set()
@@ -498,6 +531,8 @@ def _join_bets(split_date: str, provider: str = "claude") -> tuple[list[BetInput
         if not m or p.get("failed") or p["market_id"] in seen:
             continue
         seen.add(p["market_id"])
+        event_id = (cluster_key(m) if cluster == "derived"
+                    else m.get("event_id", m["market_id"]))
         bet = BetInput(
             market_id=m["market_id"],
             question=m["question"],
@@ -507,7 +542,7 @@ def _join_bets(split_date: str, provider: str = "claude") -> tuple[list[BetInput
             close_time=m["end_date"],
             category=m["category"],
             evidence_strength=p.get("evidence_strength", "none"),
-            event_id=m.get("event_id", m["market_id"]),
+            event_id=event_id,
         )
         (train if m["end_date"][:10] < split_date else test).append(bet)
     return train, test
@@ -516,7 +551,7 @@ def _join_bets(split_date: str, provider: str = "claude") -> tuple[list[BetInput
 def _print_report(name: str, r) -> None:
     print(f"\n--- {name} ---")
     print(f"  markets={r.n_markets} trades={r.n_trades} staked=${r.total_staked:.0f}")
-    print(f"  P&L=${r.total_pnl:+.2f}  ROI={r.roi:+.1%}  (90% CI per-trade: {r.roi_ci_low:+.1%} … {r.roi_ci_high:+.1%})")
+    print(f"  P&L=${r.total_pnl:+.2f}  ROI={r.roi:+.1%}  (90% CI: {r.roi_ci_low:+.1%} … {r.roi_ci_high:+.1%})")
     print(f"  win_rate={r.win_rate:.1%}  avg|edge|={r.avg_edge_taken:.3f}  max_dd=${r.max_drawdown:.0f}")
     print(f"  kelly bankroll $1000 → ${r.kelly_final_bankroll:.0f}")
     print(f"  Brier (all):    blend={r.brier_blend:.4f}  market={r.brier_market:.4f}")
@@ -525,7 +560,7 @@ def _print_report(name: str, r) -> None:
 
 async def stage_evaluate(args) -> None:
     provider = getattr(args, "provider", "claude")
-    train, test = _join_bets(args.split_date, provider)
+    train, test = _join_bets(args.split_date, provider, getattr(args, "cluster", "stored"))
     print(f"Train: {len(train)} markets (close < {args.split_date}) | Test: {len(test)} markets "
           f"[provider={provider}]")
     if not train or not test:
@@ -593,8 +628,11 @@ async def stage_evaluate(args) -> None:
             "pure_model": pure.to_dict(),
         },
     }
-    eval_file = (EVALUATION_FILE if provider == "claude"
-                 else DATA_DIR / f"evaluation.{model_id}.json")
+    cluster_mode = getattr(args, "cluster", "stored")
+    stem = "evaluation" if provider == "claude" else f"evaluation.{model_id}"
+    if cluster_mode != "stored":
+        stem += f".{cluster_mode}"
+    eval_file = DATA_DIR / f"{stem}.json"
     eval_file.write_text(json.dumps(output, indent=2))
     print(f"\nFull evaluation written → {eval_file}")
 
@@ -616,6 +654,10 @@ def main() -> None:
     parser.add_argument("--provider", choices=["claude", "openai"], default="claude",
                         help="forecaster backend; openai writes to its own predictions/evaluation "
                              "files so the archived claude baseline is never overwritten")
+    parser.add_argument("--cluster", choices=["stored", "derived"], default="stored",
+                        help="bootstrap clustering: 'stored' reproduces the published CI "
+                             "(inert -- event_id == market_id); 'derived' groups correlated "
+                             "markets and gives the honest, wider CI")
     parser.add_argument("--limit", type=int, default=0,
                         help="predict: cap markets this run (0 = all); use for cheap smoke tests")
     args = parser.parse_args()

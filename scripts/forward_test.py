@@ -512,8 +512,10 @@ def stage_report(args) -> int:
         "baseline": {
             "source": "data/baselines/claude-fable-5-2026-06-10",
             "test_roi": 0.3052,
-            "test_ci_90": [0.0797, 0.554],
-            "note": "claude-fable-5, no volume floor; CI computed with inert clustering",
+            "test_ci_90": [0.0514, 0.5629],
+            "note": ("claude-fable-5, no volume floor, event-clustered CI. A DIFFERENT "
+                     "model and a different universe than this test — reference only, "
+                     "not a like-for-like target."),
         },
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
