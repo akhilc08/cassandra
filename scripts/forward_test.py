@@ -514,7 +514,7 @@ def stage_report(args) -> int:
             "test_roi": 0.3052,
             "test_ci_90": [0.0514, 0.5629],
             "note": ("claude-fable-5, no volume floor, event-clustered CI. A DIFFERENT "
-                     "model and a different universe than this test — reference only, "
+                     "model and a different universe than this test: reference only, "
                      "not a like-for-like target."),
         },
     }
