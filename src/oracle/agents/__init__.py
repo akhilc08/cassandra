@@ -1,20 +1,50 @@
-"""Oracle Multi-Agent System — orchestrates research, quant, risk, and portfolio management."""
+"""Oracle Multi-Agent System — orchestrates research, quant, risk, and portfolio management.
+
+Submodule imports are LAZY. `import oracle.agents.forecaster` used to drag in the
+whole platform via this file — paper_trading pulls aiosqlite, and the agent modules
+pull the rest — so the forward test could not run anywhere that had not installed the
+full platform. It failed in CI for exactly that reason while passing locally, because
+the dev venv happened to have aiosqlite.
+
+`from oracle.agents import AgentSystem, ResearchAgent, ...` still works; the cost is
+just deferred to first access (PEP 562).
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from oracle.agents.base import BaseAgent
-from oracle.agents.cache import ToolCache, get_cache
-from oracle.agents.messages import MessageBus
-from oracle.agents.paper_trading import PaperTradingEngine
-from oracle.agents.portfolio_manager import PortfolioManagerAgent
-from oracle.agents.quantitative import QuantitativeAgent
-from oracle.agents.research import ResearchAgent
-from oracle.agents.risk import RiskAgent
+if TYPE_CHECKING:  # import-time only for type checkers, never at runtime
+    from oracle.agents.base import BaseAgent
+
+_LAZY_EXPORTS = {
+    "BaseAgent": "oracle.agents.base",
+    "ToolCache": "oracle.agents.cache",
+    "get_cache": "oracle.agents.cache",
+    "MessageBus": "oracle.agents.messages",
+    "PaperTradingEngine": "oracle.agents.paper_trading",
+    "PortfolioManagerAgent": "oracle.agents.portfolio_manager",
+    "QuantitativeAgent": "oracle.agents.quantitative",
+    "ResearchAgent": "oracle.agents.research",
+    "RiskAgent": "oracle.agents.risk",
+}
+
+__all__ = ["AgentSystem", *_LAZY_EXPORTS]
+
+
+def __getattr__(name: str) -> Any:
+    module_path = _LAZY_EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    value = getattr(importlib.import_module(module_path), name)
+    globals()[name] = value  # cache so subsequent lookups skip __getattr__
+    return value
+
 
 logger = structlog.get_logger()
 
@@ -30,6 +60,14 @@ class AgentSystem:
     """
 
     def __init__(self, db_path: str = "oracle.db", initial_cash: float = 10000.0) -> None:
+        from oracle.agents.cache import get_cache
+        from oracle.agents.messages import MessageBus
+        from oracle.agents.paper_trading import PaperTradingEngine
+        from oracle.agents.portfolio_manager import PortfolioManagerAgent
+        from oracle.agents.quantitative import QuantitativeAgent
+        from oracle.agents.research import ResearchAgent
+        from oracle.agents.risk import RiskAgent
+
         self.bus = MessageBus()
         self.trading_engine = PaperTradingEngine(db_path=db_path, initial_cash=initial_cash)
         self.cache = get_cache()
