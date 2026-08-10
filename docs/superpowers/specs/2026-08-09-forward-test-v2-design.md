@@ -141,6 +141,41 @@ re-tuning. The test split (May–Jun) is clean under every variant.
 **Go/no-go:** proceed if primary-evaluation test ROI is positive with a CI lower
 bound above −5% under *real* clustering. Otherwise stop and reconsider the model.
 
+### Phase 0 result — 2026-08-10: **GO**
+
+959/959 markets forecast by `gpt-5.6-luna`, zero failures, actual cost **$0.18**.
+Test-split results, event-clustered CI:
+
+| variant | trades | ROI | 90% CI | |
+|---|---|---|---|---|
+| **PRIMARY** frozen params, ≥$500k | 124 | **+31.8%** | [+6.9%, +58.6%] | clear |
+| frozen params, all volumes | 141 | +17.6% | [−5.4%, +41.4%] | spans zero |
+| re-tuned on full train, ≥$500k | 197 | +36.9% | [+11.6%, +63.8%] | clear |
+| re-tuned on clean Mar–Apr, ≥$500k | 160 | +19.1% | [−2.0%, +39.9%] | spans zero |
+
+Findings:
+
+- **The edge transfers, but only with the volume floor.** Without it luna's CI spans
+  zero. The floor was selected on Claude's data and independently improves a different
+  forecaster by a comparable margin (+17.6% → +31.8%) — corroboration that it is not
+  test-set overfitting.
+- **Do not re-tune.** The two re-tunes disagree violently (+36.9% vs +19.1%) on
+  identical predictions, differing only in `max_divergence` (1.0 vs 0.35). The grid is
+  flat and the choice is noise-driven. The pre-registered params stay.
+- **luna is better calibrated than Claude yet makes less money** (Brier 0.2534 vs
+  0.2616; traded 0.2337 vs 0.2464). Consistent with the edge coming from extreme
+  disagreement: better calibration produces fewer extreme divergences to trade.
+- `reasoning={"effort":"none"}` **is** honored on luna — 0 reasoning tokens vs 119 when
+  omitted (60 vs 180 output tokens). Omitting it would have roughly tripled the bill.
+- Strict `json_schema` on the Responses API works. Batch was not needed at this price.
+
+**Remaining gate before Phase 4 (official).** Phase 3 shadow mode must complete at
+least one full live cycle — decisions logged from a real scan, and at least one
+settled — before a pre-registration is written. The first live `scan` returned 0
+candidates (expected: ~1.3/day at this floor), so the plumbing has not yet been
+exercised end to end on real data. `data/forward/preregistration.json` must not be
+created until it has.
+
 ## Runner
 
 `scripts/forward_test.py`, subcommands `scan` / `settle` / `report`.

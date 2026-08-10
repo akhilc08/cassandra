@@ -47,7 +47,13 @@ class Settings(BaseSettings):
     news_poll_interval_seconds: int = 900  # 15 min
     market_poll_interval_seconds: int = 60
 
-    model_config = {"env_prefix": "ORACLE_", "env_file": ".env"}
+    # Forecaster credentials. Declared without the ORACLE_ prefix because the
+    # OpenAI SDK and GitHub Actions both use the bare OPENAI_API_KEY name; the
+    # forecaster reads os.environ directly, this entry just stops the .env file
+    # from tripping the extra-inputs guard.
+    openai_api_key: str = ""
+
+    model_config = {"env_prefix": "ORACLE_", "env_file": ".env", "extra": "ignore"}
 
 
 settings = Settings()
