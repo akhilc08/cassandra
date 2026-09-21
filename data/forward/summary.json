@@ -1,28 +1,27 @@
 {
-  "generated_at": "2026-09-20T13:34:34.977251+00:00",
+  "generated_at": "2026-09-21T15:53:28.255488+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 500000.0,
-  "last_decision_ts": "2026-09-18T13:34:59.525408+00:00",
+  "last_decision_ts": "2026-09-21T15:53:16.732323+00:00",
   "counts": {
-    "no_trade": 30,
-    "settled": 3,
-    "open": 1
+    "no_trade": 31,
+    "settled": 4
   },
-  "n_decisions": 34,
+  "n_decisions": 35,
   "shadow": {
     "mode": "shadow",
-    "n_settled": 3,
-    "n_trades": 3,
-    "total_pnl": -21.03541185527328,
-    "roi": -0.0701180395175776,
-    "win_rate": 0.6666666666666666,
-    "roi_ci_low": -0.5833333333333334,
-    "roi_ci_high": 0.44309725429817814,
-    "brier_blend": 0.0876,
-    "brier_market": 0.09769508333333332,
+    "n_settled": 4,
+    "n_trades": 4,
+    "total_pnl": 69.44077862091719,
+    "roi": 0.17360194655229297,
+    "win_rate": 0.75,
+    "roi_ci_low": -0.375,
+    "roi_ci_high": 0.722203893104586,
+    "brier_blend": 0.1018,
+    "brier_market": 0.1320775625,
     "max_drawdown": 100.0,
-    "n_clusters": 3
+    "n_clusters": 4
   },
   "official": {
     "mode": "official",
