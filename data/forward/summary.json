@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-09-25T14:35:43.324398+00:00",
+  "generated_at": "2026-09-26T13:44:58.669570+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 500000.0,
-  "last_decision_ts": "2026-09-24T14:11:35.663847+00:00",
+  "last_decision_ts": "2026-09-26T13:44:42.953825+00:00",
   "counts": {
-    "no_trade": 34,
+    "no_trade": 36,
     "settled": 4
   },
-  "n_decisions": 38,
+  "n_decisions": 40,
   "shadow": {
     "mode": "shadow",
     "n_settled": 4,
