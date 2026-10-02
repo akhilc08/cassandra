@@ -62,19 +62,51 @@ Order is the user's question order: heartbeat, then performance, then the decisi
 
 ## Signature elements
 
-**The heartbeat.** A persistent status strip at the top, always the first thing read:
-freshness of the last run, a live/stale/dead verdict, and time since. Under 36h calm,
-36-72h warning, over 72h a loud failure. It carries a slow two-second pulse when live,
-which is the page's only ambient motion and doubles as proof the page itself rendered.
+**The heartbeat.** A persistent status strip at the top, always the first thing read.
+Its state is decided in this order, and the first rule that applies wins:
+
+1. `summary.health == "failed"` → dead, verdict `LAST SCAN FAILED`, with the last scan
+   record's status and error. A scan that crashed must never show as live because the
+   report step afterwards still succeeded.
+2. `summary.health == "degraded"` → warning, with the reason: evidence channel below
+   8/10 day pages, forecast failures in the last scan, or more than 24h since a scan.
+3. Otherwise age since `scan_health.last_scan_ts` (falling back to `generated_at`):
+   under 24h calm, 24-48h warning, over 48h a loud failure. Scans run every 6h, so
+   48h is eight missed cycles, not a slow day.
+
+Below the verdict sentence, one ruled line of run counters from the last scan record
+(candidates, illiquid, forecasts ok, wiki day pages, evidence coverage over 14 days,
+runs in the last 7 days). Schedule copy is derived from `summary.schedule`, never
+hard-coded. It carries a slow two-second pulse when live, which is the page's only
+ambient motion and doubles as proof the page itself rendered.
 
 **The interval bar.** ROI is drawn as its confidence interval on a shared axis with a
 tick at the point estimate and a marked zero line, not as a big number. If the interval
 straddles zero, that is immediately visible. This is the honest primitive of the whole
 project rendered as a graphic, and it replaces the banned hero metric.
 
-**The verdict line.** Every decision row states in plain words which rule bound it:
-`edge 0.041 < 0.08 threshold`, `edge 0.412 > 0.35 divergence cap`, `price 0.985 outside
-0.03-0.97`. This is the "why" the product exists to answer.
+Each mode draws three bars, in this order: **primary** (final volume ≥ $500k at
+resolution, evidence channel on: the pre-registered endpoint and the like-for-like
+match to the backtest), **secondary** (volume ≥ $500k at decision time), **all
+settled**. A population with no settled trades is still listed, as a line saying so,
+so the absence is visible rather than silent. The backtest reference is a fourth bar
+in its own group, on the same axis.
+
+The bar never says "clear of zero" before the stopping rule allows it. Until the
+primary population reaches `analysis_plan.target_n_trades_primary` (200) every bar is
+captioned `interim: n of 200 primary trades`; the daily CI is a progress report, not a
+look. Only at or past the target does the caption become `interval clear of zero` /
+`interval crosses zero`. Calibration (Brier, model vs market, all resolved rows and
+the in-band subset) sits under each mode's bars as a small ruled table, labelled as
+being over all scanned markets rather than trades; the per-bar Brier is labelled
+`traded rows only`.
+
+**The verdict line.** Every decision row states in plain words which rule bound it, in
+the order `decide_trade` applies them: `price 0.985 outside 0.03–0.97 (no trade
+regardless of edge)`, then `|edge| 0.412 > 0.35 divergence cap`, then `|edge| 0.041 <
+0.08 threshold`. This is the "why" the product exists to answer. The expanded record
+also states whether the evidence channel was on for that row, the horizon to close,
+the served model, final volume, and the market's outcome even when it was not traded.
 
 ## Motion
 
@@ -85,6 +117,9 @@ makes expansion instant.
 
 ## Empty state
 
-Designed as a first-class view. It reports what the pipeline is waiting for and what
-the volume floor implies about expected frequency, so zero decisions reads as a
-measurement rather than a malfunction. It never uses the word "yet" alone.
+Designed as a first-class view. It reports what the pipeline is waiting for: the scan
+floor (volume to date at scan time), the primary rule (final volume at resolution, with
+the evidence channel on), the cadence and window from `summary.schedule`, and the
+observed decision rate derived from `n_decisions` and the first decision date rather
+than a hard-coded figure. Zero decisions then reads as a measurement rather than a
+malfunction. It never uses the word "yet" alone.
