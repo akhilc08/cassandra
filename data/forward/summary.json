@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-02T12:40:29.951557+00:00",
+  "generated_at": "2026-10-02T22:17:31.576334+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 20000.0,
@@ -24,13 +24,13 @@
     "look": "one confirmatory look when the primary population reaches 200 settled trades",
     "interim": true
   },
-  "last_decision_ts": "2026-10-02T02:23:29.138981+00:00",
+  "last_decision_ts": "2026-10-02T22:17:15.526475+00:00",
   "counts": {
-    "no_trade": 59,
+    "no_trade": 70,
     "settled": 4,
-    "open": 3
+    "open": 7
   },
-  "n_decisions": 66,
+  "n_decisions": 81,
   "shadow": {
     "primary": {
       "population": "primary",
@@ -66,14 +66,14 @@
       "n_clusters": 4
     },
     "calibration": {
-      "n_resolved": 54,
-      "brier_model": 0.20730555555555555,
-      "brier_market": 0.04549028703703704,
-      "n_in_band": 11,
-      "brier_model_in_band": 0.3775181818181818,
-      "brier_market_in_band": 0.13437104545454545
+      "n_resolved": 60,
+      "brier_model": 0.20788833333333334,
+      "brier_market": 0.042358445833333334,
+      "n_in_band": 13,
+      "brier_model_in_band": 0.34654615384615384,
+      "brier_market_in_band": 0.12013557692307691
     },
-    "n_open": 3
+    "n_open": 7
   },
   "official": {
     "primary": {
@@ -97,43 +97,43 @@
     "n_open": 0
   },
   "scan_health": {
-    "last_scan_ts": "2026-10-02T12:40:28.208353+00:00",
+    "last_scan_ts": "2026-10-02T22:17:15.526475+00:00",
     "hours_since_last_scan": 0.0,
-    "last_status": "no_candidates",
+    "last_status": "ok",
     "last_exit_code": 0,
-    "runs_last_7d": 2,
+    "runs_last_7d": 3,
     "failed_runs_last_7d": 0,
     "last_run": {
-      "ts": "2026-10-02T12:40:28.208353+00:00",
+      "ts": "2026-10-02T22:17:15.526475+00:00",
       "mode": "shadow",
       "exit_code": 0,
-      "status": "no_candidates",
+      "status": "ok",
       "window_lo": 12.0,
       "window_hi": 27.0,
       "scan_min_volume": 20000.0,
-      "n_raw": 129,
-      "gamma_pages": 3,
+      "n_raw": 228,
+      "gamma_pages": 4,
       "gamma_truncated": false,
-      "n_candidates": 0,
-      "n_illiquid": 0,
+      "n_candidates": 16,
+      "n_illiquid": 1,
       "n_book_failed": 0,
       "n_market_failed": 0,
-      "n_forecast_attempted": 0,
-      "n_forecast_ok": 0,
+      "n_forecast_attempted": 15,
+      "n_forecast_ok": 15,
       "n_forecast_failed": 0,
-      "n_open": 0,
-      "n_no_trade": 0,
+      "n_open": 4,
+      "n_no_trade": 11,
       "wiki_days_ok": 10,
       "wiki_days_cached": 10,
       "wiki_days_failed": 0,
       "coverage_gap_hours": 0.0,
-      "duration_s": 1.1,
+      "duration_s": 14.5,
       "error": null
     },
     "evidence": {
       "last_wiki_days_ok": 10,
-      "decisions_last_14d": 35,
-      "decisions_with_evidence_last_14d": 10
+      "decisions_last_14d": 47,
+      "decisions_with_evidence_last_14d": 25
     }
   },
   "health": "ok",
