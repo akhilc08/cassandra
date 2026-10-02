@@ -66,6 +66,19 @@ are not transferable to a different forecaster — a model with different calibr
 has a different optimal shrinkage and threshold. Any new model must re-tune on the
 train split.
 
+> **Note (2026-09-25).** The forward test deliberately does **not** re-tune these
+> parameters for `gpt-5.6-luna`. The design doc's Phase 0 tests the transfer rather
+> than assuming it: the frozen claude params were applied unchanged to luna's
+> predictions, and the edge held (test: 124 trades, +31.8%, event-clustered 90% CI
+> [+6.9%, +58.6%], final volume ≥ $500k). The two luna re-tunes were rejected
+> because they disagreed by 18 points (+36.9% vs +19.1%) on identical predictions,
+> differing only in `max_divergence` — the grid is flat and the choice is noise.
+> `data/backtest/evaluation.gpt-5.6-luna.primary.json` (regenerated with
+> `scripts/backtest.py evaluate --provider openai --cluster derived --params-from
+> data/baselines/claude-fable-5-2026-06-10/evaluation.json --eval-min-volume 500000
+> --out-stem evaluation.gpt-5.6-luna.primary`) is the like-for-like reference for the
+> forward test's primary population.
+
 ## Test-split baselines it beat
 
 - always-NO: +7.6%

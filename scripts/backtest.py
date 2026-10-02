@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import random
 import re
@@ -518,17 +519,23 @@ async def stage_predict(args) -> None:
 
 def _join_bets(
     split_date: str, provider: str = "claude", cluster: str = "stored",
+    min_volume: float = 0.0,
 ) -> tuple[list[BetInput], list[BetInput]]:
     """cluster='stored' reproduces the published result exactly (event_id as
     collected, which equals market_id for all 959 rows and makes the bootstrap
     effectively per-trade). cluster='derived' groups correlated markets properly
-    and yields the honest, wider CI."""
+    and yields the honest, wider CI.
+
+    min_volume filters both splits on the market's FINAL volume as collected
+    (the evaluation-universe rule); 0.0 keeps every market."""
     markets = {m["market_id"]: m for m in _load_jsonl(MARKETS_FILE)}
     train, test = [], []
     seen: set[str] = set()
     for p in _load_jsonl(predictions_file(provider)):
         m = markets.get(p["market_id"])
         if not m or p.get("failed") or p["market_id"] in seen:
+            continue
+        if float(m.get("volume") or 0.0) < min_volume:
             continue
         seen.add(p["market_id"])
         event_id = (cluster_key(m) if cluster == "derived"
@@ -548,6 +555,34 @@ def _join_bets(
     return train, test
 
 
+_GAME_DAY_QUESTION = re.compile(r"^Will .+ win on \d{4}-\d{2}-\d{2}\?$")
+_GAME_DAY_CATEGORY = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+
+
+def is_game_day_market(question: str, category: str) -> bool:
+    """Single-game sports markets ("Will X win on 2026-05-03?", or a
+    league-team-team-date category slug) -- the bulk of the traded universe."""
+    return bool(_GAME_DAY_QUESTION.match(question or "")
+                or _GAME_DAY_CATEGORY.search(category or ""))
+
+
+def load_params_from(path: Path) -> StrategyParams:
+    """Import 'frozen_params' from another evaluation.json unchanged (no re-tune)."""
+    frozen = json.loads(path.read_text())["frozen_params"]
+    names = {f.name for f in dataclasses.fields(StrategyParams)}
+    return StrategyParams(**{k: v for k, v in frozen.items() if k in names})
+
+
+def _subgroup_report(bets: list[BetInput], params: StrategyParams) -> dict:
+    r = simulate(bets, params)
+    return {
+        "n_markets": r.n_markets,
+        "n_trades": r.n_trades,
+        "roi": round(r.roi, 4),
+        "roi_ci_90": [round(r.roi_ci_low, 4), round(r.roi_ci_high, 4)],
+    }
+
+
 def _print_report(name: str, r) -> None:
     print(f"\n--- {name} ---")
     print(f"  markets={r.n_markets} trades={r.n_trades} staked=${r.total_staked:.0f}")
@@ -560,25 +595,38 @@ def _print_report(name: str, r) -> None:
 
 async def stage_evaluate(args) -> None:
     provider = getattr(args, "provider", "claude")
-    train, test = _join_bets(args.split_date, provider, getattr(args, "cluster", "stored"))
+    eval_min_volume = float(getattr(args, "eval_min_volume", 0.0) or 0.0)
+    params_from = getattr(args, "params_from", None)
+    train, test = _join_bets(
+        args.split_date, provider, getattr(args, "cluster", "stored"),
+        min_volume=eval_min_volume,
+    )
     print(f"Train: {len(train)} markets (close < {args.split_date}) | Test: {len(test)} markets "
-          f"[provider={provider}]")
+          f"[provider={provider} eval_min_volume={eval_min_volume:g}]")
     if not train or not test:
         print("Not enough data on one side of the split — run collect/predict first.")
         return
 
-    print("\nGrid search on TRAIN (ranked by bootstrap ROI lower bound):")
-    ranked = grid_search(train, min_trades=max(10, len(train) // 12))
-    for r in ranked[:5]:
-        p = r.params
-        gate = p.evidence_gate or "-"
-        print(
-            f"  alpha={p.alpha:.2f} tau={p.threshold:.2f} gate={gate:<9} "
-            f"trades={r.n_trades:3d} pnl=${r.total_pnl:+8.2f} roi={r.roi:+.1%} ci_low={r.roi_ci_low:+.1%}"
-        )
-
-    best = ranked[0].params
-    print(f"\nFrozen params: alpha={best.alpha} tau={best.threshold} gate={best.evidence_gate}")
+    if params_from:
+        # Transfer test: another model's frozen params applied unchanged, no
+        # grid search, so nothing here is tuned on this provider's predictions.
+        ranked = []
+        best = load_params_from(Path(params_from))
+        print(f"\nFrozen params imported from {params_from} (grid search skipped): "
+              f"alpha={best.alpha} tau={best.threshold} gate={best.evidence_gate} "
+              f"max_div={best.max_divergence}")
+    else:
+        print("\nGrid search on TRAIN (ranked by bootstrap ROI lower bound):")
+        ranked = grid_search(train, min_trades=max(10, len(train) // 12))
+        for r in ranked[:5]:
+            p = r.params
+            gate = p.evidence_gate or "-"
+            print(
+                f"  alpha={p.alpha:.2f} tau={p.threshold:.2f} gate={gate:<9} "
+                f"trades={r.n_trades:3d} pnl=${r.total_pnl:+8.2f} roi={r.roi:+.1%} ci_low={r.roi_ci_low:+.1%}"
+            )
+        best = ranked[0].params
+        print(f"\nFrozen params: alpha={best.alpha} tau={best.threshold} gate={best.evidence_gate}")
 
     train_report = simulate(train, best)
     test_report = simulate(test, best)
@@ -594,6 +642,23 @@ async def stage_evaluate(args) -> None:
     _print_report("BASELINE buy-favorite (test)", fav)
     _print_report("BASELINE always-no (test)", ano)
     _print_report("BASELINE pure-model alpha=1 tau=0.05 (test)", pure)
+
+    # Test split by market type: single-game sports vs everything else. The
+    # live universe's composition differs from the backtest's, so the edge
+    # has to be visible per subgroup, not just in aggregate.
+    game_day = [b for b in test if is_game_day_market(b.question, b.category)]
+    other = [b for b in test if not is_game_day_market(b.question, b.category)]
+    subgroups = {
+        "split": "test",
+        "rule": "game_day_sports: question ~ '^Will .+ win on YYYY-MM-DD?$' or category ~ '-YYYY-MM-DD$'",
+        "game_day_sports": _subgroup_report(game_day, best),
+        "other": _subgroup_report(other, best),
+    }
+    print("\nTest split by subgroup:")
+    for name in ("game_day_sports", "other"):
+        sg = subgroups[name]
+        print(f"  {name:<16} markets={sg['n_markets']:3d} trades={sg['n_trades']:3d} "
+              f"roi={sg['roi']:+.1%}  (90% CI: {sg['roi_ci_90'][0]:+.1%} … {sg['roi_ci_90'][1]:+.1%})")
 
     # Edge by month — parametric leakage would show as edge decaying with
     # distance from the model's Jan 2026 training cutoff.
@@ -627,11 +692,20 @@ async def stage_evaluate(args) -> None:
             "always_no": ano.to_dict(),
             "pure_model": pure.to_dict(),
         },
+        "subgroups": subgroups,
     }
     cluster_mode = getattr(args, "cluster", "stored")
+    output["cluster"] = cluster_mode
+    if params_from:
+        output["params_source"] = str(params_from)
+    if eval_min_volume > 0:
+        output["eval_min_volume"] = eval_min_volume
     stem = "evaluation" if provider == "claude" else f"evaluation.{model_id}"
     if cluster_mode != "stored":
         stem += f".{cluster_mode}"
+    out_stem = getattr(args, "out_stem", None)
+    if out_stem:
+        stem = out_stem
     eval_file = DATA_DIR / f"{stem}.json"
     eval_file.write_text(json.dumps(output, indent=2))
     print(f"\nFull evaluation written → {eval_file}")
@@ -660,6 +734,14 @@ def main() -> None:
                              "markets and gives the honest, wider CI")
     parser.add_argument("--limit", type=int, default=0,
                         help="predict: cap markets this run (0 = all); use for cheap smoke tests")
+    parser.add_argument("--params-from", default=None, metavar="PATH",
+                        help="evaluate: import 'frozen_params' from this evaluation.json and skip "
+                             "the grid search (transfer test of another model's params)")
+    parser.add_argument("--eval-min-volume", type=float, default=0.0, metavar="FLOAT",
+                        help="evaluate: keep only markets whose FINAL volume >= this "
+                             "(the evaluation-universe rule); 0 = all markets")
+    parser.add_argument("--out-stem", default=None, metavar="NAME",
+                        help="evaluate: override the output filename stem under data/backtest/")
     args = parser.parse_args()
 
     async def run():
