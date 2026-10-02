@@ -1,8 +1,29 @@
 {
-  "generated_at": "2026-10-01T16:25:17.802552+00:00",
+  "generated_at": "2026-10-02T02:19:09.877800+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
-  "min_volume": 500000.0,
+  "min_volume": 20000.0,
+  "universe": {
+    "scan_min_volume_to_date": 20000.0,
+    "primary_min_final_volume": 500000.0,
+    "secondary_min_volume_at_decision": 500000.0,
+    "min_age_days": 3.0,
+    "max_open_per_cluster": 2,
+    "evidence_ok_min_days": 8
+  },
+  "schedule": {
+    "cron_utc": "17 */6 * * *",
+    "window_hours": [
+      12.0,
+      27.0
+    ],
+    "nominal_horizon_hours": 24
+  },
+  "analysis_plan": {
+    "target_n_trades_primary": 200,
+    "look": "one confirmatory look when the primary population reaches 200 settled trades",
+    "interim": true
+  },
   "last_decision_ts": "2026-09-30T15:54:18.833544+00:00",
   "counts": {
     "no_trade": 52,
@@ -10,31 +31,89 @@
   },
   "n_decisions": 56,
   "shadow": {
-    "mode": "shadow",
-    "n_settled": 4,
-    "n_trades": 4,
-    "total_pnl": 69.44077862091719,
-    "roi": 0.17360194655229297,
-    "win_rate": 0.75,
-    "roi_ci_low": -0.375,
-    "roi_ci_high": 0.722203893104586,
-    "brier_blend": 0.1018,
-    "brier_market": 0.1320775625,
-    "max_drawdown": 100.0,
-    "n_clusters": 4
+    "primary": {
+      "population": "primary",
+      "n_settled": 0,
+      "n_trades": 0
+    },
+    "secondary_at_decision": {
+      "population": "secondary_at_decision",
+      "n_settled": 4,
+      "n_trades": 4,
+      "total_pnl": 69.44077862091719,
+      "roi": 0.17360194655229297,
+      "win_rate": 0.75,
+      "roi_ci_low": -0.375,
+      "roi_ci_high": 0.722203893104586,
+      "brier_blend_traded": 0.1018,
+      "brier_market_traded": 0.1320775625,
+      "max_drawdown": 100.0,
+      "n_clusters": 4
+    },
+    "all": {
+      "population": "all",
+      "n_settled": 4,
+      "n_trades": 4,
+      "total_pnl": 69.44077862091719,
+      "roi": 0.17360194655229297,
+      "win_rate": 0.75,
+      "roi_ci_low": -0.375,
+      "roi_ci_high": 0.722203893104586,
+      "brier_blend_traded": 0.1018,
+      "brier_market_traded": 0.1320775625,
+      "max_drawdown": 100.0,
+      "n_clusters": 4
+    },
+    "calibration": {
+      "n_resolved": 54,
+      "brier_model": 0.20730555555555555,
+      "brier_market": 0.04549028703703704,
+      "n_in_band": 11,
+      "brier_model_in_band": 0.3775181818181818,
+      "brier_market_in_band": 0.13437104545454545
+    },
+    "n_open": 0
   },
   "official": {
-    "mode": "official",
-    "n_settled": 0,
-    "n_trades": 0
+    "primary": {
+      "population": "primary",
+      "n_settled": 0,
+      "n_trades": 0
+    },
+    "secondary_at_decision": {
+      "population": "secondary_at_decision",
+      "n_settled": 0,
+      "n_trades": 0
+    },
+    "all": {
+      "population": "all",
+      "n_settled": 0,
+      "n_trades": 0
+    },
+    "calibration": {
+      "n_resolved": 0
+    },
+    "n_open": 0
   },
+  "scan_health": null,
+  "health": "unknown",
   "baseline": {
-    "source": "data/baselines/claude-fable-5-2026-06-10",
-    "test_roi": 0.3052,
+    "source": "data/backtest/evaluation.gpt-5.6-luna.primary.json",
+    "test_roi": 0.3178,
     "test_ci_90": [
-      0.0514,
-      0.5629
+      0.0692,
+      0.5865
     ],
-    "note": "claude-fable-5, no volume floor, event-clustered CI. A DIFFERENT model and a different universe than this test: reference only, not a like-for-like target."
-  }
+    "n_trades": 124,
+    "note": "gpt-5.6-luna, frozen claude params, final volume >= $500k, event-clustered CI: the like-for-like reference for the primary population",
+    "claude_reference": {
+      "source": "data/baselines/claude-fable-5-2026-06-10",
+      "test_roi": 0.3052,
+      "test_ci_90": [
+        0.0514,
+        0.5629
+      ]
+    }
+  },
+  "shadow_note": "Shadow rows 2026-08-12..2026-09-24 were forecast with the Wikipedia channel dead (n_wiki_events == 0 on every row) under a $500k volume-to-date floor; they are reported as shadow only and are excluded from the primary population."
 }
