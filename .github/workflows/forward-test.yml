@@ -83,6 +83,7 @@ jobs:
           tests/unit/test_pnl.py
           tests/unit/test_time_machine.py
           tests/unit/test_wiki_events.py
+          tests/unit/test_forecaster_openai.py
           -q
 
       # scan exit codes:
