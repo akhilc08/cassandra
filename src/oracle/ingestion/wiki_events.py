@@ -36,7 +36,7 @@ WIKI_API = "https://en.wikipedia.org/w/api.php"
 # ran six weeks with zero evidence on every decision under the old
 # contact-free string. Keep the repo URL in here.
 USER_AGENT = (
-    "CassandraForwardTest/2.0 (https://github.com/akhilc08/oracle; "
+    "CassandraForwardTest/2.0 (https://github.com/akhilc08/cassandra; "
     "prediction-market research; contact via GitHub issues) python-httpx"
 )
 

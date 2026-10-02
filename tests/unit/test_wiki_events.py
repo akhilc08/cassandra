@@ -14,13 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
-from oracle.ingestion import wiki_events as we
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+from oracle.ingestion import wiki_events as we  # noqa: E402
 
 DAY = date(2026, 9, 20)
 REVID = 1375926008
@@ -161,7 +164,7 @@ class TestFetchDayEventsStatus:
         await we.fetch_day_events_status(DAY, client, tmp_path)
         assert rec.requests, "no request was issued"
         for request in rec.requests:
-            assert "https://github.com/akhilc08/oracle" in request.headers["user-agent"]
+            assert "https://github.com/akhilc08/cassandra" in request.headers["user-agent"]
             assert request.url.params.get("maxlag") == "5"
 
 
