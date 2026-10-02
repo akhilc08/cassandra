@@ -2,13 +2,13 @@
 
 Autonomous AI prediction engine for [Polymarket](https://polymarket.com). Cassandra forecasts markets with a market-blind LLM, trades the disagreement against real prices, and measures itself with a leak-controlled backtest — end to end, no human in the loop.
 
-**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +5.1%…+56.3%, clear of zero) in a leak-controlled time-machine backtest against real market prices.** Not yet confirmed by live forward testing — see [Known limitations](#known-limitations).
+**+30.5% out-of-sample ROI on 144 simulated trades (90% CI +5.1%…+56.3%, clear of zero) in a leak-controlled time-machine backtest against real market prices.** A live shadow forward test is running (see [Forward test](#forward-test-paper-trading)); the edge is not yet confirmed on live order books.
 
 ---
 
 ## How the predictor works
 
-1. **Forecast (market-blind)** — a pinned LLM (`claude-fable-5`) estimates P(YES) from dated evidence and base rates, *without seeing the market price*. Shown the price, LLMs anchor to it within ±1¢ — which destroys the signal. Evidence comes from revision-pinned Wikipedia Current Events pages (plus web search in live mode).
+1. **Forecast (market-blind)** — a pinned LLM (`claude-fable-5`) estimates P(YES) from dated evidence and base rates, *without seeing the market price*. Shown the price, LLMs anchor to it within ±1¢ — which destroys the signal. Evidence comes from revision-pinned Wikipedia Current Events pages.
 2. **Blend & decide** — the strategy layer shrinks the forecast toward the market (`p = α·p_model + (1−α)·p_market`) and buys the cheap side when the divergence exceeds a threshold τ. α and τ are tuned on a train split and frozen.
 3. **Verify** — every claim of edge is checked against real prices at decision time via a time-machine backtest over 959 resolved markets.
 
@@ -77,7 +77,7 @@ clustered properly.
 
 ### Known limitations
 
-- The test window is one regime (May–Jun 2026); a single period can favor a long-shot book. Forward (paper-trading) confirmation on live order books is still the bar before real capital, and has not yet been run — the backtest's blind spots (real spreads, executability, regime dependence) remain open.
+- The test window is one regime (May–Jun 2026); a single period can favor a long-shot book. Forward (paper-trading) confirmation on live order books is still the bar before real capital. A **shadow** run has been live on GitHub Actions since 2026-08-10 (56 decisions, 4 settled as of 2026-10-01; dashboard: https://akhilc08.github.io/cassandra/). The shadow period found plumbing defects rather than a result: the Wikipedia evidence channel was dead on every decision (blocked User-Agent, cold cache, swallowed failures), the $500k floor was applied to volume-to-date instead of final volume (cutting supply to ~8% of the backtest-equivalent and excluding game-day sports markets), and a daily cron drifting 3–6h made the realised horizon bimodal instead of 24h. All are fixed in shadow; those rows never count. **Official** mode starts when `data/forward/preregistration.json` is committed — until then the backtest's blind spots (real spreads, executability, regime dependence) remain open.
 - Market universe filtered on **final** volume (post-T information) — selection, not leakage, but live deployment would select on volume-to-date.
 - Universe limited to markets still open 24h before *scheduled* close with clean YES/NO resolution; early-resolving and disputed markets are excluded.
 - 1¢ flat slippage approximates execution; thin books would fill worse than the last-trade price.
@@ -104,6 +104,20 @@ python3 -m venv .venv
 ```
 
 Full artifacts: `data/backtest/evaluation.json` (per-trade detail), `data/backtest/probe.json`.
+
+---
+
+## Forward test (paper trading)
+
+`scripts/forward_test.py` runs the frozen strategy against live Polymarket order books from GitHub Actions (`.github/workflows/forward-test.yml`, cron `17 */6 * * *`), with `gpt-5.6-luna` as the forecaster behind the same market-blind prompt. Strategy code is *imported* from `src/oracle/evaluation/pnl.py`, never re-implemented, and the runner exits non-zero if its params differ from the frozen baseline. Results are committed back to `data/forward/` and published at https://akhilc08.github.io/cassandra/.
+
+- **scan** — markets closing in 12–27h (nominal horizon 24h, the backtest's T) with volume-to-date ≥ $20k (the backtest's collect floor), ≥ 3 days old, ≤ 2 open per event cluster. Wikipedia day pages (last 10 days, revision-pinned, cache committed under `data/forward/wiki_cache`) are fetched once per run; each market gets a forecast and a `decide_trade` verdict. One row per attempted market in `decisions.jsonl` (`open`, `no_trade` or `forecast_failed`), each carrying `hours_to_close`, `evidence_ok`, the served model snapshot and token usage.
+- **settle** — once a market closes, every row for it gets `outcome_yes`, `ts_resolved` and `volume_final`; `open` rows get P&L at the recorded book mid with 1¢ slippage (replica) and at the recorded ask (executable).
+- **report** — `summary.json`, via the same `simulate()` and event-cluster bootstrap as the backtest.
+
+Three populations are reported per mode: **primary** — evidence channel healthy at decision time (`evidence_ok`) and **final** volume ≥ $500k, the like-for-like match for the backtest's evaluation universe; **secondary** — volume ≥ $500k at decision time; **all** — every settled trade. Calibration (model vs market Brier) is measured over every resolved scanned market, traded or not.
+
+Health: every scan appends a row to `data/forward/scans.jsonl`; the summary's `health` is `ok`, `degraded` (fewer than 8/10 Wikipedia day pages, forecast failures in the last run, or > 24h since the last scan), `failed` (Gamma, CLOB or forecaster outage, missing API key, crash) or `unknown`. Reading the dashboard: the banner is the health verdict plus staleness (warn > 24h, error > 48h since the last scan); **shadow** and **official** rows are labelled and never pooled; every CI is *interim* until the single pre-registered look at 200 settled primary trades. Analysis plan and pre-registration draft: `docs/superpowers/specs/2026-08-09-forward-test-v2-design.md`.
 
 ---
 
@@ -197,7 +211,8 @@ Optional LoRA fine-tuning on resolved markets: `modal run src/oracle/training/mo
 
 ```
 scripts/
-└── backtest.py      # time-machine backtest: collect → refresh → probe → predict → evaluate
+├── backtest.py      # time-machine backtest: collect → refresh → probe → predict → evaluate
+└── forward_test.py  # live paper trading on GitHub Actions: scan → settle → report
 
 src/oracle/
 ├── agents/          # forecaster (market-blind, pinned), research, reflection, risk, portfolio
@@ -213,5 +228,6 @@ src/oracle/
 └── training/        # Modal LoRA fine-tuning, synthetic data generator
 
 data/
-└── backtest/        # markets.jsonl, predictions.jsonl, evaluation.json, probe.json
+├── backtest/        # markets.jsonl, predictions.jsonl, evaluation.json, probe.json
+└── forward/         # decisions.jsonl, scans.jsonl, summary.json, wiki_cache/ (committed)
 ```
