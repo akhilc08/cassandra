@@ -1,31 +1,40 @@
-# Cassandra forward paper-trading test — daily scan/settle/report + dashboard publish.
+# Cassandra forward paper-trading test — 6-hourly scan/settle/report + dashboard
+# publish.
 #
 # HEADS UP: GitHub disables scheduled workflows in a repository that has had no
 # activity for 60 days (it emails the repo admin and the cron silently stops).
 # The commit-back step below is what keeps this workflow alive: every run that
-# produces a new decision or an updated summary pushes a commit, which resets
-# that 60-day inactivity clock. If the commit-back is ever removed, expect the
-# schedule to die two months later.
+# produces a new decision, scan record or updated summary pushes a commit, which
+# resets that 60-day inactivity clock. If the commit-back is ever removed, expect
+# the schedule to die two months later.
 #
-# Cron on GitHub is best-effort: runs drift 5-30+ minutes past the scheduled
-# time and are occasionally dropped entirely during peak load. Nothing here may
-# assume exactly-once or on-time execution — `scan` skips markets already
-# present in decisions.jsonl, `settle` only settles what has resolved, and
-# `report` rewrites summary.json from scratch, so extra runs, missed runs and
-# manual runs all converge to the same state.
+# Cron on GitHub is best-effort, and for this repository badly so: observed
+# start times drift 3-6 HOURS past the scheduled minute (not the 5-30 minutes
+# the docs suggest), the drift regime shifted on 2026-08-27, and runs are
+# occasionally dropped entirely. Nothing here may assume exactly-once or on-time
+# execution. The runner is idempotent by construction:
+#   - `scan` dedupes on market_id against decisions.jsonl, so a late, extra or
+#     manual run never logs a market twice;
+#   - the scan window is [12h, 27h] to market close on a 6h cadence, so a market
+#     stays scannable for a 15h span of run times: up to 15h between consecutive
+#     runs leaves no market unseen, and any larger gap is recorded as
+#     coverage_gap_hours in data/forward/scans.jsonl rather than silently lost;
+#   - `settle` only settles what has resolved and `report` rewrites summary.json
+#     from scratch, so extra runs, missed runs and manual runs all converge to
+#     the same state.
 
 name: forward-test
 
 on:
   schedule:
-    # 09:17 UTC daily. Off-the-hour minute: :00 is the busiest slot on GitHub's
-    # scheduler and the most likely to be delayed or dropped.
-    - cron: "17 9 * * *"
+    # 00:17, 06:17, 12:17, 18:17 UTC. Off-the-hour minute: :00 is the busiest
+    # slot on GitHub's scheduler and the most likely to be delayed or dropped.
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 # One run at a time. Never cancel a run in flight: a cancelled run can leave the
 # repo with decisions written but not committed, and cancelling mid-push is how
-# you lose a day of decisions.
+# you lose a scan's worth of decisions.
 concurrency:
   group: forward-test-${{ github.ref }}
   cancel-in-progress: false
@@ -33,7 +42,7 @@ concurrency:
 jobs:
   forward-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: write
     outputs:
@@ -44,8 +53,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # Full history: `git pull --rebase` in the commit-back step is
-          # unreliable against a depth-1 clone.
+          # Full history: the rebase in the commit-back step is unreliable
+          # against a depth-1 clone.
           fetch-depth: 0
 
       - name: Set up Python 3.14
@@ -53,23 +62,44 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-          # Dependencies are pinned in this file rather than a requirements
-          # file, so this file is the correct cache key: editing the install
-          # list below invalidates the cache.
-          cache-dependency-path: .github/workflows/forward-test.yml
+          cache-dependency-path: requirements-forward.txt
 
       - name: Install dependencies
         id: install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install httpx structlog pydantic-settings numpy scipy openai pytest
+          python -m pip install -r requirements-forward.txt
 
-      # scan exits 1 only when candidates were found and ZERO forecasts
-      # succeeded (the v1 failure mode). No candidates at the $500k volume floor
-      # is a normal day and exits 0. A non-zero exit here fails the job, which is
-      # the point — but settle/report below still run.
+      # A broken runner must never trade: `scan` is gated on this step. A failing
+      # test fails the job here, before any market is scanned, but settle/report/
+      # commit below still run (they only need the install), so already-logged
+      # rows keep getting settled and the dashboard keeps reflecting reality.
+      # test_wiki_events.py covers the Wikipedia evidence channel.
+      - name: Unit tests
+        id: tests
+        run: >-
+          python -m pytest
+          tests/unit/test_forward.py
+          tests/unit/test_pnl.py
+          tests/unit/test_time_machine.py
+          tests/unit/test_wiki_events.py
+          -q
+
+      # scan exit codes:
+      #   0 = ok / no candidates / only one-sided books skipped (a normal run);
+      #   1 = outage or degraded (forecast_outage, clob_outage, evidence_degraded,
+      #       gamma_unavailable) — rows MAY still have been logged;
+      #   2 = OPENAI_API_KEY unset (checked before any HTTP).
+      # Every scan appends one row to data/forward/scans.jsonl (in a finally),
+      # which is how the failure reaches summary.scan_health and the dashboard.
+      # A non-zero exit fails the step and the job, which is the point — but
+      # settle/report/commit run regardless, so whatever scan managed to log is
+      # still settled, summarised and committed. The step timeout likewise fails
+      # only this step; the following `!cancelled()` steps still run.
       - name: Scan for new decisions
         id: scan
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        timeout-minutes: 20
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/forward_test.py scan
@@ -83,6 +113,7 @@ jobs:
         run: python scripts/forward_test.py report
 
       - name: Commit data files
+        id: commit
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           BRANCH: ${{ github.ref_name }}
@@ -91,9 +122,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          for f in data/forward/decisions.jsonl data/forward/summary.json; do
+          for f in data/forward/decisions.jsonl data/forward/scans.jsonl data/forward/summary.json; do
             if [ -f "$f" ]; then git add -- "$f"; fi
           done
+          # Wikipedia day-page cache: files are both created and pruned by the
+          # runner, so stage additions and deletions alike.
+          git add -A -- data/forward/wiki_cache
 
           if git diff --cached --quiet; then
             echo "No changes to data/forward — nothing to commit."
@@ -103,30 +137,53 @@ jobs:
           git commit -m "forward test $(date -u +%Y-%m-%d)"
 
           # Another run (or a human) may have pushed since checkout. Rebase onto
-          # the remote and retry once before giving up.
-          for attempt in 1 2; do
-            echo "push attempt $attempt"
-            git pull --rebase --autostash origin "$BRANCH" \
-              && git push origin "HEAD:$BRANCH" \
-              && exit 0
+          # the remote. decisions.jsonl and scans.jsonl merge as line unions
+          # (.gitattributes); summary.json is derived from them, so when it is
+          # the only conflicting path we regenerate it on top of the merged
+          # data instead of resolving by hand. Any other conflict aborts.
+          sync_and_push() {
+            git fetch origin "$BRANCH" || return 1
+            if ! git rebase "origin/$BRANCH"; then
+              unmerged="$(git diff --name-only --diff-filter=U)"
+              if [ "$unmerged" = "data/forward/summary.json" ]; then
+                echo "summary.json conflicted on rebase; regenerating it from the merged data files."
+                python scripts/forward_test.py report || { git rebase --abort || true; exit 1; }
+                git add data/forward/summary.json || { git rebase --abort || true; exit 1; }
+                GIT_EDITOR=true git rebase --continue || { git rebase --abort || true; exit 1; }
+              else
+                echo "Rebase conflict outside summary.json: ${unmerged:-<none reported>}" >&2
+                git rebase --abort || true
+                exit 1
+              fi
+            fi
+            git push origin "HEAD:$BRANCH"
+          }
+
+          if ! sync_and_push; then
+            echo "Push rejected (remote moved again?); refetching and retrying once." >&2
             sleep 10
-          done
-          echo "Failed to push data/forward after 2 attempts." >&2
-          exit 1
+            sync_and_push
+          fi
 
       # The dashboard fetches its data same-origin. Publish the data files at
       # both data/forward/<name> and <name> so the page works whichever relative
       # path it asks for.
+      #
+      # Gated on the commit step not having FAILED (skipped is fine): the site
+      # must never advertise data the repository did not receive. A failed scan
+      # is not a reason to skip publishing — the failure is recorded in
+      # scans.jsonl and surfaces as summary.scan_health / summary.health, which
+      # is exactly what the dashboard should be showing.
       - name: Assemble publish directory
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.commit.outcome != 'failure' }}
         run: |
           set -euo pipefail
           mkdir -p _site/data/forward
           cp dashboard/index.html _site/index.html
-          # decisions.jsonl does not exist until the first decision is written;
-          # publish an empty file so the dashboard gets a 200, not a 404.
-          touch data/forward/decisions.jsonl
-          for f in decisions.jsonl summary.json; do
+          # decisions.jsonl / scans.jsonl do not exist until the first row is
+          # written; publish empty files so the dashboard gets a 200, not a 404.
+          touch data/forward/decisions.jsonl data/forward/scans.jsonl
+          for f in decisions.jsonl scans.jsonl summary.json; do
             cp "data/forward/$f" "_site/data/forward/$f"
             cp "data/forward/$f" "_site/$f"
           done
@@ -134,18 +191,24 @@ jobs:
 
       - name: Upload Pages artifact
         id: upload
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.commit.outcome != 'failure' }}
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
   deploy:
     needs: forward-test
-    # Runs even when the scan failed: a summary that records the failure is
-    # exactly what the dashboard should be showing. Skipped only if there is no
-    # artifact to deploy.
-    if: ${{ !cancelled() && needs.forward-test.outputs.artifact == 'success' }}
+    # Runs even when the scan failed: scans.jsonl records the failure, report
+    # folds it into summary.scan_health / summary.health, and the dashboard
+    # shows it. Skipped only if there is no artifact to deploy (install failed,
+    # or the commit-back failed and the artifact was withheld) or the run is not
+    # on main (Pages serves main only).
+    if: ${{ !cancelled() && needs.forward-test.outputs.artifact == 'success' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    # Pages deployments serialise on their own group; never cancel one in flight.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       contents: read
       pages: write

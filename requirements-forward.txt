@@ -1,0 +1,10 @@
+# Runtime deps of scripts/forward_test.py on the Actions runner; pinned to the
+# versions of the last green run 2026-09-25; bump deliberately.
+httpx==0.28.1
+structlog==26.1.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+numpy==2.5.3
+scipy==1.18.1
+openai==3.14.0
+pytest==9.1.1
