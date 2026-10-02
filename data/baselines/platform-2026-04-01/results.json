@@ -1,0 +1,134 @@
+{
+  "backtest_report": {
+    "volume": {
+      "markets_evaluated": 50,
+      "markets_resolved": 50,
+      "resolution_rate": 1.0
+    },
+    "calibration": {
+      "brier_score": 0.2495,
+      "log_loss": 0.7051,
+      "overall_accuracy": 0.68,
+      "calibration_error": 0.3138,
+      "calibration_curve": [
+        {
+          "bucket": "50-60%",
+          "predicted_avg": 0.5175,
+          "actual_rate": 1.0,
+          "count": 4
+        },
+        {
+          "bucket": "60-70%",
+          "predicted_avg": 0.62,
+          "actual_rate": 1.0,
+          "count": 4
+        },
+        {
+          "bucket": "70-80%",
+          "predicted_avg": 0.7447,
+          "actual_rate": 0.8235,
+          "count": 17
+        },
+        {
+          "bucket": "80-90%",
+          "predicted_avg": 0.85,
+          "actual_rate": null,
+          "count": 0
+        },
+        {
+          "bucket": "90-100%",
+          "predicted_avg": 0.95,
+          "actual_rate": null,
+          "count": 0
+        }
+      ]
+    },
+    "edge": {
+      "ev_per_trade": -0.2318,
+      "market_adjusted_return": -0.02,
+      "alpha_rate": 0.66
+    },
+    "hit_rate_by_tier": {
+      "50-60%": {
+        "count": 4,
+        "accuracy": 1.0
+      },
+      "60-70%": {
+        "count": 4,
+        "accuracy": 1.0
+      },
+      "70-80%": {
+        "count": 17,
+        "accuracy": 0.8235
+      },
+      "80-90%": {
+        "count": 0,
+        "accuracy": null
+      },
+      "90-100%": {
+        "count": 0,
+        "accuracy": null
+      }
+    },
+    "pipeline": {
+      "judge_consistency": 0.0,
+      "bias_detection_recall": 0.0,
+      "hallucination_catch_rate": 0.96,
+      "latency_p50_seconds": 11.53,
+      "latency_p95_seconds": 20.058
+    },
+    "by_category": {
+      "other": {
+        "count": 50,
+        "accuracy": 0.68,
+        "brier_score": 0.2495,
+        "ev_per_trade": -0.2318
+      }
+    }
+  },
+  "db_cumulative": {
+    "total_predictions": 380,
+    "overall_accuracy": 0.6053,
+    "brier_score": 0.3424,
+    "log_loss": 0.9401,
+    "alpha_rate": 0.6026,
+    "ev_per_trade": -0.0341,
+    "market_adjusted_return": 0.1868,
+    "hallucination_catch_rate": 0.8026,
+    "bias_flag_rate": 0.8368,
+    "avg_latency_seconds": 12.27,
+    "hit_rate_by_tier": {
+      "50-60%": {
+        "count": 311,
+        "accuracy": 0.6206
+      },
+      "60-70%": {
+        "count": 43,
+        "accuracy": 0.3721
+      },
+      "70-80%": {
+        "count": 24,
+        "accuracy": 0.7917
+      },
+      "80-90%": {
+        "count": 1,
+        "accuracy": 1.0
+      },
+      "90-100%": {
+        "count": 1,
+        "accuracy": 1.0
+      }
+    },
+    "by_category": {
+      "other": {
+        "count": 380,
+        "accuracy": 0.6053,
+        "brier_score": 0.3424,
+        "ev_per_trade": -0.0341
+      }
+    }
+  },
+  "markets_attempted": 50,
+  "markets_evaluated": 50,
+  "markets_skipped": 0
+}

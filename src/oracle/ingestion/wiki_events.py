@@ -30,17 +30,41 @@ from oracle.ingestion.gdelt_client import _STOPWORDS
 logger = structlog.get_logger()
 
 WIKI_API = "https://en.wikipedia.org/w/api.php"
-USER_AGENT = "cassandra-backtest/1.0 (prediction market research)"
+# Wikimedia's User-Agent policy requires a descriptive agent WITH contact
+# information. Agents without it are throttled or refused at the edge, and
+# cloud-runner IPs (GitHub Actions) are held to it strictly: the forward test
+# ran six weeks with zero evidence on every decision under the old
+# contact-free string. Keep the repo URL in here.
+USER_AGENT = (
+    "CassandraForwardTest/2.0 (https://github.com/akhilc08/oracle; "
+    "prediction-market research; contact via GitHub issues) python-httpx"
+)
 
-# MediaWiki rate-limits anonymous bursts; throttle and back off on 429.
-_rate_lock = asyncio.Lock()
-_THROTTLE_SECONDS = 0.5
-_BACKOFF_SECONDS = 12.0
+# MediaWiki rate-limits anonymous bursts; throttle and back off on 429. The
+# lock is (re)created inside the running loop so the module survives more than
+# one asyncio.run() per process (tests, CLI subcommands).
+_rate_lock: asyncio.Lock | None = None
+_rate_lock_loop: asyncio.AbstractEventLoop | None = None
+_THROTTLE_SECONDS = 1.0
+_BACKOFF_SECONDS = 5.0
+_MAX_ATTEMPTS = 3
+
+
+def _lock() -> asyncio.Lock:
+    global _rate_lock, _rate_lock_loop
+    loop = asyncio.get_running_loop()
+    if _rate_lock is None or _rate_lock_loop is not loop:
+        _rate_lock = asyncio.Lock()
+        _rate_lock_loop = loop
+    return _rate_lock
 
 
 async def _api_get(client: httpx.AsyncClient, params: dict) -> dict:
-    async with _rate_lock:
-        for attempt in range(4):
+    # maxlag: when the database replicas lag, the API answers HTTP 200 with an
+    # error envelope instead of piling on; treat it like a 429.
+    params = {**params, "maxlag": "5"}
+    async with _lock():
+        for attempt in range(_MAX_ATTEMPTS):
             await asyncio.sleep(_THROTTLE_SECONDS)
             resp = await client.get(WIKI_API, params=params, headers={"User-Agent": USER_AGENT})
             if resp.status_code == 429:
@@ -48,7 +72,19 @@ async def _api_get(client: httpx.AsyncClient, params: dict) -> dict:
                 await asyncio.sleep(_BACKOFF_SECONDS * (attempt + 1))
                 continue
             resp.raise_for_status()
-            return resp.json()
+            payload = resp.json()
+            err = payload.get("error") if isinstance(payload, dict) else None
+            if err:
+                # An error envelope must never be mistaken for "page absent":
+                # the caller would cache an empty day forever.
+                if err.get("code") == "maxlag":
+                    logger.warning("wiki_events.maxlag", attempt=attempt)
+                    await asyncio.sleep(_BACKOFF_SECONDS * (attempt + 1))
+                    continue
+                raise RuntimeError(
+                    f"wikipedia API error: {err.get('code')}: {err.get('info', '')[:120]}"
+                )
+            return payload
     raise RuntimeError("wikipedia API rate limit persisted after retries")
 
 _MONTHS = [
@@ -94,19 +130,26 @@ async def _pinned_revision_id(
     return pages[0]["revisions"][0]["revid"]
 
 
-async def fetch_day_events(
+async def fetch_day_events_status(
     d: date,
     client: httpx.AsyncClient,
     cache_dir: Path,
-) -> list[str]:
-    """Event lines for one day, pinned to the same-day revision, cached on disk."""
+) -> tuple[list[str], str]:
+    """Event lines for one day, pinned to the same-day revision, cached on disk.
+
+    Returns (lines, status) with status in {"cache", "fetched", "absent",
+    "failed"}. A failed day is NOT cached, so the next run retries it; "absent"
+    (the page did not exist by end of day D) is cached as empty. Callers that
+    need to know whether the evidence channel is alive must look at the status:
+    "no relevant events" and "every fetch failed" both yield [] otherwise.
+    """
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / f"{d.isoformat()}.json"
     if cache_file.exists():
         try:
             cached = json.loads(cache_file.read_text())
             if isinstance(cached, dict) and "revid" in cached:
-                return cached["lines"]
+                return cached["lines"], "cache"
         except json.JSONDecodeError:
             pass
     try:
@@ -114,7 +157,7 @@ async def fetch_day_events(
         if revid is None:
             # Page did not exist by end of day D — no contemporaneous evidence.
             cache_file.write_text(json.dumps({"revid": 0, "lines": []}))
-            return []
+            return [], "absent"
         payload = await _api_get(client, {
             "action": "parse",
             "oldid": str(revid),
@@ -123,11 +166,71 @@ async def fetch_day_events(
             "formatversion": "2",
         })
         lines = parse_day_page(payload.get("parse", {}).get("text", ""))
-    except Exception as e:
-        logger.warning("wiki_events.fetch_failed", day=d.isoformat(), error=str(e))
-        return []
+    except httpx.HTTPStatusError as e:
+        # The status code and body head are the one thing that tells an operator
+        # WHY a runner cannot reach Wikipedia (403 = UA policy, 429 = rate limit).
+        logger.warning(
+            "wiki_events.fetch_failed", day=d.isoformat(),
+            status=e.response.status_code, body=e.response.text[:200],
+        )
+        return [], "failed"
+    except Exception as e:  # noqa: BLE001 — evidence is best-effort; never crash a scan
+        logger.warning("wiki_events.fetch_failed", day=d.isoformat(),
+                       error=f"{type(e).__name__}: {e}"[:200])
+        return [], "failed"
     cache_file.write_text(json.dumps({"revid": revid, "lines": lines}))
+    return lines, "fetched"
+
+
+async def fetch_day_events(
+    d: date,
+    client: httpx.AsyncClient,
+    cache_dir: Path,
+) -> list[str]:
+    """Event lines for one day (status-blind wrapper kept for the backtest)."""
+    lines, _ = await fetch_day_events_status(d, client, cache_dir)
     return lines
+
+
+async def fetch_days_before(
+    cutoff: datetime,
+    client: httpx.AsyncClient,
+    cache_dir: Path,
+    lookback_days: int = 10,
+    max_consecutive_failures: int = 3,
+) -> tuple[dict[str, list[str]], dict]:
+    """Fetch (or load from cache) every full day page before the cutoff date, ONCE.
+
+    The forward runner calls this once per scan and then matches each market's
+    question against the shared `events_by_date` with `relevant_events`, instead
+    of re-fetching ten day pages per candidate. Returns (events_by_date, stats)
+    where stats = {"days_ok", "days_cached", "days_fetched", "days_absent",
+    "days_failed", "days_skipped"}. After `max_consecutive_failures` failures in
+    a row the remaining days are skipped without a request (circuit breaker:
+    a blocked runner must not spend minutes in backoff), and counted as failed.
+    """
+    events_by_date: dict[str, list[str]] = {}
+    stats = {"days_ok": 0, "days_cached": 0, "days_fetched": 0, "days_absent": 0,
+             "days_failed": 0, "days_skipped": 0}
+    consecutive_failures = 0
+    last_day = cutoff.date() - timedelta(days=1)
+    for i in range(lookback_days):
+        d = last_day - timedelta(days=i)
+        if consecutive_failures >= max_consecutive_failures:
+            stats["days_skipped"] += 1
+            stats["days_failed"] += 1
+            continue
+        lines, status = await fetch_day_events_status(d, client, cache_dir)
+        if status == "failed":
+            consecutive_failures += 1
+            stats["days_failed"] += 1
+            continue
+        consecutive_failures = 0
+        stats["days_ok"] += 1
+        stats[f"days_{status}" if status != "cache" else "days_cached"] += 1
+        if lines:
+            events_by_date[d.isoformat()] = lines
+    return events_by_date, stats
 
 
 def question_terms(question: str, max_terms: int = 10) -> list[str]:
