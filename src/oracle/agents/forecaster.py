@@ -62,6 +62,12 @@ class Forecast:
     failed: bool = False  # call/parse failure — must be excluded from trading
     model: str = FORECAST_MODEL
     raw_response: str = ""
+    # Provenance of the served model: the alias above can be silently re-pointed
+    # by the provider, and a reasoning-effort default change would show up only
+    # here. Populated by the OpenAI transport; empty/None for the Claude CLI.
+    served_model: str = ""
+    output_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
     def to_dict(self) -> dict:
         return {

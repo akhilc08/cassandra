@@ -146,4 +146,20 @@ async def forecast(
     if not text:
         logger.warning("forecaster_openai.empty_response", question=question[:60])
         return _failed("empty response")
-    return parse_response(text)
+    result = parse_response(text)
+    # Provenance: which snapshot actually answered, and whether reasoning tokens
+    # were billed (they must be 0 under effort "none"; a nonzero count means the
+    # provider changed the default under us and the registration is void).
+    result.served_model = str(getattr(resp, "model", "") or "")
+    usage = getattr(resp, "usage", None)
+    result.output_tokens = _int_or_none(getattr(usage, "output_tokens", None))
+    details = getattr(usage, "output_tokens_details", None)
+    result.reasoning_tokens = _int_or_none(getattr(details, "reasoning_tokens", None))
+    return result
+
+
+def _int_or_none(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
