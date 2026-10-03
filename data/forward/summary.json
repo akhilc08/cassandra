@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-03T05:22:28.343754+00:00",
+  "generated_at": "2026-10-03T11:42:59.228928+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 20000.0,
@@ -24,13 +24,13 @@
     "look": "one confirmatory look when the primary population reaches 200 settled trades",
     "interim": true
   },
-  "last_decision_ts": "2026-10-03T05:22:18.128349+00:00",
+  "last_decision_ts": "2026-10-03T11:42:53.310527+00:00",
   "counts": {
-    "no_trade": 73,
+    "no_trade": 74,
     "settled": 6,
     "open": 5
   },
-  "n_decisions": 84,
+  "n_decisions": 85,
   "shadow": {
     "primary": {
       "population": "primary",
@@ -106,43 +106,43 @@
     "n_open": 0
   },
   "scan_health": {
-    "last_scan_ts": "2026-10-03T05:22:18.128349+00:00",
+    "last_scan_ts": "2026-10-03T11:42:53.310527+00:00",
     "hours_since_last_scan": 0.0,
     "last_status": "ok",
     "last_exit_code": 0,
-    "runs_last_7d": 4,
+    "runs_last_7d": 5,
     "failed_runs_last_7d": 0,
     "last_run": {
-      "ts": "2026-10-03T05:22:18.128349+00:00",
+      "ts": "2026-10-03T11:42:53.310527+00:00",
       "mode": "shadow",
       "exit_code": 0,
       "status": "ok",
       "window_lo": 12.0,
       "window_hi": 27.0,
       "scan_min_volume": 20000.0,
-      "n_raw": 169,
+      "n_raw": 195,
       "gamma_pages": 3,
       "gamma_truncated": false,
-      "n_candidates": 4,
-      "n_illiquid": 1,
+      "n_candidates": 3,
+      "n_illiquid": 2,
       "n_book_failed": 0,
       "n_market_failed": 0,
-      "n_forecast_attempted": 3,
-      "n_forecast_ok": 3,
+      "n_forecast_attempted": 1,
+      "n_forecast_ok": 1,
       "n_forecast_failed": 0,
       "n_open": 0,
-      "n_no_trade": 3,
+      "n_no_trade": 1,
       "wiki_days_ok": 10,
-      "wiki_days_cached": 9,
+      "wiki_days_cached": 10,
       "wiki_days_failed": 0,
       "coverage_gap_hours": 0.0,
-      "duration_s": 9.1,
+      "duration_s": 5.3,
       "error": null
     },
     "evidence": {
       "last_wiki_days_ok": 10,
-      "decisions_last_14d": 50,
-      "decisions_with_evidence_last_14d": 28
+      "decisions_last_14d": 51,
+      "decisions_with_evidence_last_14d": 29
     }
   },
   "health": "ok",
