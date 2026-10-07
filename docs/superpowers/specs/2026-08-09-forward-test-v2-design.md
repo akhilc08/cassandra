@@ -408,6 +408,55 @@ the rows above stay shadow-only and outside every official population.
    `data/backtest/evaluation.gpt-5.6-luna.primary.json` (gate item); `served_model` and
    `usage` per row; pinned CI deps with unit tests in the workflow.
 
+## Shadow-period findings, part 2 (2026-10-07): the forecaster has no skill
+
+From 2026-10-02 the shadow run went from +17% on 4 trades to **−61% on 44 (−$2,700)**;
+PRIMARY −72% on 11, CI [−100%, −16%]. Nothing broke. The diagnosis:
+
+1. **The model forecasts no better than a coin.** Brier: backtest 0.255, live 0.263;
+   a constant 0.50 scores 0.250 (market: 0.208 backtest, 0.076 live). It answered
+   exactly 0.50 on 399/959 backtest markets and "evidence: none" on 85%. Its inputs are
+   a 2026-02-16 knowledge cutoff (8 months stale live), no headlines (the backtest ran
+   `--skip-gdelt`, so the replica feeds `headlines=[]`), and Wikipedia events on about
+   a third of markets.
+2. **So the strategy fades favourites when the model knows nothing.** "Model 0.50,
+   market 0.80" is a 0.30 edge inside the band, so it buys NO.
+3. **The backtest edge was not the model's.** The same frozen params fed a constant
+   0.50: test split (May–Jun) **+53.2%** vs luna's +31.8%; clean train (Feb 16–Apr)
+   −5.7% vs +26.9%; live −22% vs −61%. The +31.8% that the registration rests on is
+   mostly a period in which underdogs won, not forecasting skill. It is not evidence
+   for this forecaster.
+4. **Correlation amplified it.** One scan on 2026-10-04 opened 21 trades on the
+   Brazilian elections, each in its own event cluster, so `max_open_per_cluster` never
+   fired: 3 wins, −$1,647, 61% of all losses.
+
+Changes, all shadow-only:
+
+- **Coin baseline everywhere.** `report` adds `coin_baseline` (the frozen strategy
+  fed p = 0.50 over every resolved scanned market in the population) to each population,
+  and `calibration.brier_coin = 0.25`; `backtest.py evaluate` adds `coin_half` to the
+  train and test baselines. The model adds something only if it beats both.
+- **News channel** `scan --news gdelt`: GDELT headlines seen before the scan (10-day
+  lookback, the backtest's source), headlines quoting Polymarket/Kalshi/odds dropped so
+  the forecaster stays market-blind, `news_status` and `n_headlines` on every row,
+  `n_news_*` per scan, `news_degraded` (exit 1) when every request failed, and a
+  540 s budget after which the remaining markets forecast without headlines
+  (`news_status = "budget"`). **Off by default** until the re-baseline below says
+  it helps.
+- **Per-scan trade cap** `MAX_TRADES_PER_SCAN = 6` (`--max-trades-per-scan`): trades
+  past the cap, in the order forecasts complete, are logged as `no_trade` with
+  `cap_skipped: true` and `capped_side`.
+- **News re-baseline.** GDELT's DOC API reaches back only ~3 months and rate-limits
+  the developer network, so the 959-market sample cannot get headlines.
+  `.github/workflows/news-sample.yml` collects a fresh sample on an Actions runner
+  (end dates 2026-07-15 … 2026-10-05, `backtest.py collect --data-dir
+  data/backtest/news`). No OpenAI key is used there. The forecasts are a separate step:
+  `predict` with headlines, `predict --strip-headlines --predictions-tag nonews` as the
+  ablation, then `evaluate` with the frozen params. **Go criterion for `--news gdelt`:**
+  with headlines, Brier < 0.25 and below the no-news ablation, and ROI above the coin
+  baseline on the same markets. If it fails, news does not rescue this forecaster and
+  the model itself has to change.
+
 ## Pre-registration (draft)
 
 Commit the following as `data/forward/preregistration.json` — and nothing before it —
@@ -434,7 +483,7 @@ non-zero on drift of `strategy.*`, `universe.scan_min_volume_to_date`,
     "source": "wikipedia pinned day pages (last revision before D+1 00:00 UTC)",
     "lookback_days": 10,
     "max_items": 8,
-    "headlines": [],
+    "headlines": "<[] or 'gdelt: 10-day lookback, odds headlines dropped, 540 s budget' -- per the news re-baseline>",
     "web_search": false,
     "row_is_evidence_ok_when": "wiki_days_ok >= 8",
     "cache": "data/forward/wiki_cache"
@@ -457,6 +506,7 @@ non-zero on drift of `strategy.*`, `universe.scan_min_volume_to_date`,
     "secondary_min_volume_at_decision": 500000,
     "min_age_days": 3,
     "max_open_per_cluster": 2,
+    "max_trades_per_scan": 6,
     "cluster_key": "forward_test.cluster_key: Gamma event id when present, else normalized category slug with strike-ladder and sub-market suffixes collapsed; never market_id"
   },
   "schedule": {
@@ -470,6 +520,7 @@ non-zero on drift of `strategy.*`, `universe.scan_min_volume_to_date`,
       "SECONDARY population ROI (volume >= 500000 at decision time)",
       "executable ROI (pnl_executable on executable_notional)",
       "always-NO comparison over the same rows",
+      "coin baseline: the frozen strategy fed p = 0.50 over every resolved scanned PRIMARY market (summary coin_baseline); the forecaster must beat it",
       "Brier model vs market over all resolved scanned rows, and the in-band subset",
       "ROI by hours_to_close bucket",
       "ROI by evidence_ok"
@@ -509,6 +560,9 @@ non-zero on drift of `strategy.*`, `universe.scan_min_volume_to_date`,
       lives in an artifact, not only in this document)
 - [ ] CI unit tests green on pinned dependencies
 - [ ] `served_model` observed on the runner and copied into `served_model_snapshot`
+- [ ] The forecaster beats the coin baseline somewhere clean: the news re-baseline
+      passes its go criterion, or a replacement model does (2026-10-07 finding: luna
+      without news does not)
 
 ## Prerequisite
 

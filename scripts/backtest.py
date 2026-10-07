@@ -58,6 +58,9 @@ MARKETS_FILE = DATA_DIR / "markets.jsonl"
 PREDICTIONS_FILE = DATA_DIR / "predictions.jsonl"
 
 
+PREDICTIONS_TAG = ""  # --predictions-tag: keeps ablation runs out of the main file
+
+
 def predictions_file(provider: str) -> Path:
     """Per-provider prediction files.
 
@@ -65,10 +68,13 @@ def predictions_file(provider: str) -> Path:
     reproducible; a different provider must never append into it, or the two
     models' forecasts silently interleave in one file.
     """
-    if provider == "claude":
+    tag = f".{PREDICTIONS_TAG}" if PREDICTIONS_TAG else ""
+    if provider == "claude" and not tag:
         return PREDICTIONS_FILE
+    if provider == "claude":
+        return DATA_DIR / f"predictions{tag}.jsonl"
     from oracle.agents.forecaster_openai import FORECAST_MODEL as OPENAI_MODEL
-    return DATA_DIR / f"predictions.{OPENAI_MODEL}.jsonl"
+    return DATA_DIR / f"predictions.{OPENAI_MODEL}{tag}.jsonl"
 
 
 def get_forecaster(provider: str):
@@ -495,10 +501,11 @@ async def stage_predict(args) -> None:
     async def predict_one(m: dict, out) -> None:
         async with semaphore:
             as_of = m["t_prediction"][:10]
+            strip = getattr(args, "strip_headlines", False)
             kwargs = dict(
                 question=m["question"],
                 as_of=as_of,
-                headlines=m["headlines"],
+                headlines=[] if strip else m["headlines"],
                 world_events=m.get("wiki_events", []),
                 description=m["description"],
             )
@@ -642,6 +649,12 @@ async def stage_evaluate(args) -> None:
     _print_report("BASELINE buy-favorite (test)", fav)
     _print_report("BASELINE always-no (test)", ano)
     _print_report("BASELINE pure-model alpha=1 tau=0.05 (test)", pure)
+    # The same strategy fed a constant 0.50: what fading favourites earns with
+    # no forecast at all. The model adds something only if it beats this.
+    coin_train = simulate([dataclasses.replace(b, p_model=0.5) for b in train], best)
+    coin = simulate([dataclasses.replace(b, p_model=0.5) for b in test], best)
+    _print_report("BASELINE coin 0.50, same params (train)", coin_train)
+    _print_report("BASELINE coin 0.50, same params (test)", coin)
 
     # Test split by market type: single-game sports vs everything else. The
     # live universe's composition differs from the backtest's, so the edge
@@ -691,7 +704,9 @@ async def stage_evaluate(args) -> None:
             "buy_favorite": fav.to_dict(),
             "always_no": ano.to_dict(),
             "pure_model": pure.to_dict(),
+            "coin_half": coin.to_dict(),
         },
+        "baselines_train": {"coin_half": coin_train.to_dict()},
         "subgroups": subgroups,
     }
     cluster_mode = getattr(args, "cluster", "stored")
@@ -740,9 +755,23 @@ def main() -> None:
     parser.add_argument("--eval-min-volume", type=float, default=0.0, metavar="FLOAT",
                         help="evaluate: keep only markets whose FINAL volume >= this "
                              "(the evaluation-universe rule); 0 = all markets")
+    parser.add_argument("--data-dir", default=None, metavar="PATH",
+                        help="work on a separate sample under this directory (markets.jsonl, "
+                             "predictions, evaluation) so the archived 959-market sample is untouched")
+    parser.add_argument("--predictions-tag", default="", metavar="TAG",
+                        help="predict/evaluate: suffix for the predictions file (ablation runs)")
+    parser.add_argument("--strip-headlines", action="store_true",
+                        help="predict: forecast with headlines removed (news ablation)")
     parser.add_argument("--out-stem", default=None, metavar="NAME",
                         help="evaluate: override the output filename stem under data/backtest/")
     args = parser.parse_args()
+    global DATA_DIR, MARKETS_FILE, PREDICTIONS_FILE, EVALUATION_FILE, PREDICTIONS_TAG
+    PREDICTIONS_TAG = args.predictions_tag
+    if args.data_dir:
+        DATA_DIR = Path(args.data_dir).resolve()
+        MARKETS_FILE = DATA_DIR / "markets.jsonl"
+        PREDICTIONS_FILE = DATA_DIR / "predictions.jsonl"
+        EVALUATION_FILE = DATA_DIR / "evaluation.json"
 
     async def run():
         if args.stage in ("collect", "all"):

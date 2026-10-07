@@ -26,3 +26,5 @@ node_modules/
 *.sqlite
 data/backtest/wiki_events/
 data/backtest/wiki_events_pinned/
+data/backtest/*/wiki_events/
+data/backtest/*/wiki_events_pinned/

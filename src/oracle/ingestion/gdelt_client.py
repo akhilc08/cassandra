@@ -38,6 +38,11 @@ _STOPWORDS = {
 }
 
 
+# Headlines quoting a prediction market's odds would hand the market-blind
+# forecaster the price it is supposed to be independent of.
+_MARKET_PRICE_SOURCES = re.compile(r"polymarket|kalshi|predictit|betting odds|\bodds\b", re.I)
+
+
 def build_query(question: str, max_terms: int = 4) -> str:
     """Build a GDELT query from a market question.
 
@@ -83,6 +88,8 @@ def parse_articles(payload: dict, cutoff: datetime) -> list[dict]:
             continue
         if seen >= cutoff:
             continue
+        if _MARKET_PRICE_SOURCES.search(a.get("title", "")):
+            continue  # the forecaster is market-blind; odds in a headline would leak the price
         out.append({
             "title": a.get("title", ""),
             "seendate": seen.isoformat(),
@@ -104,10 +111,26 @@ async def fetch_news_before(
     Tries the full keyword query first, then relaxes to fewer terms if
     nothing matches.
     """
+    articles, _ = await fetch_news_status(question, cutoff, lookback_days, max_records, client)
+    return articles
+
+
+async def fetch_news_status(
+    question: str,
+    cutoff: datetime,
+    lookback_days: int = 10,
+    max_records: int = 12,
+    client: httpx.AsyncClient | None = None,
+    relax: bool = True,
+) -> tuple[list[dict], str]:
+    """`fetch_news_before` plus why it came back empty: "ok", "empty" (GDELT
+    answered, nothing matched) or "failed" (rate-limited or errored). The live
+    runner needs the difference: a dead channel must not pass for a quiet one.
+    """
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=30.0)
     try:
-        for max_terms in (4, 2):
+        for max_terms in ((4, 2) if relax else (4,)):
             query = build_query(question, max_terms=max_terms)
             params = {
                 "query": query,
@@ -120,12 +143,12 @@ async def fetch_news_before(
             }
             payload = await _throttled_get(client, params)
             if payload is None:
-                return []  # rate-limited out or hard failure — don't burn more slots
+                return [], "failed"  # rate-limited out or hard failure — don't burn more slots
             articles = parse_articles(payload, cutoff)
             if articles:
-                return articles
+                return articles, "ok"
             # success but no matches → relax query and try once more
-        return []
+        return [], "empty"
     finally:
         if own_client:
             await client.aclose()

@@ -637,6 +637,8 @@ class ScanWorld:
         self.events = {iso(NOW)[:10]: ["Candidate 1 wins the special election after a recount."]}
         self.forecaster = lambda question: good_forecast()
         self.forecast_calls: list[dict] = []
+        self.news = lambda question: ([], "empty")
+        self.news_calls: list[str] = []
         patch_data_dir(tmp_path, monkeypatch)
         monkeypatch.setattr(ft, "_GAMMA_BACKOFF_SECONDS", 0.0)
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -644,6 +646,7 @@ class ScanWorld:
                             lambda **kw: FakeClient(self.route, self.calls))
         monkeypatch.setattr(ft, "forecast", self._forecast)
         monkeypatch.setattr(ft, "fetch_days_before", self._fetch_days_before)
+        monkeypatch.setattr(ft, "fetch_news_status", self._fetch_news_status)
 
     def route(self, url, params):
         if url.endswith("/markets"):
@@ -656,8 +659,13 @@ class ScanWorld:
         raise AssertionError(f"unexpected GET {url}")
 
     async def _forecast(self, question, as_of, headlines, world_events=None, description=""):
-        self.forecast_calls.append({"question": question, "world_events": world_events})
+        self.forecast_calls.append({"question": question, "world_events": world_events,
+                                    "headlines": headlines})
         return self.forecaster(question)
+
+    async def _fetch_news_status(self, question, cutoff, lookback_days=10, client=None):
+        self.news_calls.append(question)
+        return self.news(question)
 
     async def _fetch_days_before(self, cutoff, client, cache_dir, lookback_days=10):
         return self.events, dict(self.wiki)
@@ -812,6 +820,85 @@ class TestScanIsolation:
         row = world.last_scan()
         assert row["n_market_failed"] == 1 and row["n_forecast_attempted"] == 3
         assert row["n_forecast_ok"] == 2
+
+
+class TestNewsChannel:
+    """--news gdelt feeds headlines to the forecaster and says on every row whether it did."""
+
+    HEADLINE = {"title": "Candidate leads final poll", "seendate": "2026-10-01T00:00:00+00:00",
+                "domain": "a.com", "url": "u"}
+
+    def test_off_by_default_reproduces_the_replica(self, world):
+        world.markets = [market(1)]
+        assert world.scan() == 0
+        assert world.news_calls == []
+        assert world.forecast_calls[0]["headlines"] == []
+        (row,) = world.decisions()
+        assert row["news_status"] == "off" and row["n_headlines"] == 0
+        assert row["params"]["news"] == "off"
+        assert world.last_scan()["news"] == "off"
+
+    def test_gdelt_headlines_reach_the_forecaster(self, world):
+        world.markets = [market(1), market(2)]
+        world.news = lambda q: ([self.HEADLINE], "ok") if "candidate 1" in q else ([], "empty")
+        assert world.scan("--news", "gdelt") == 0
+        by_q = {c["question"]: c["headlines"] for c in world.forecast_calls}
+        assert by_q[market(1)["question"]] == [self.HEADLINE]
+        assert by_q[market(2)["question"]] == []
+        rows = {r["market_id"]: r for r in world.decisions()}
+        assert rows["1"]["news_status"] == "ok" and rows["1"]["n_headlines"] == 1
+        assert rows["2"]["news_status"] == "empty" and rows["2"]["n_headlines"] == 0
+        scan = world.last_scan()
+        assert scan["news"] == "gdelt" and scan["n_news_ok"] == 1 and scan["n_news_empty"] == 1
+
+    def test_a_dead_news_channel_degrades_the_run_but_still_logs(self, world):
+        world.markets = [market(1), market(2)]
+        world.news = lambda q: ([], "failed")
+        assert world.scan("--news", "gdelt") == 1
+        scan = world.last_scan()
+        assert scan["status"] == "news_degraded" and scan["n_news_failed"] == 2
+        assert {r["news_status"] for r in world.decisions()} == {"failed"}
+        assert len(world.decisions()) == 2
+
+    def test_past_the_budget_markets_forecast_without_news(self, world, monkeypatch):
+        monkeypatch.setattr(ft, "NEWS_BUDGET_SECONDS", 0.0)
+        world.markets = [market(1)]
+        world.news = lambda q: ([self.HEADLINE], "ok")
+        assert world.scan("--news", "gdelt") == 0
+        assert world.news_calls == []
+        (row,) = world.decisions()
+        assert row["news_status"] == "budget" and row["status"] == "open"
+        assert world.last_scan()["n_news_budget"] == 1
+
+
+class TestTradesPerScanCap:
+    """One scan cannot open more than --max-trades-per-scan trades, whatever the clusters."""
+
+    def test_trades_beyond_the_cap_are_logged_as_capped_no_trades(self, world):
+        world.markets = [market(i) for i in range(1, 9)]
+        assert world.scan() == 0
+        rows = world.decisions()
+        opened = [r for r in rows if r["status"] == "open"]
+        capped = [r for r in rows if r.get("cap_skipped")]
+        assert len(opened) == ft.MAX_TRADES_PER_SCAN == 6
+        assert len(capped) == 2
+        assert all(r["status"] == "no_trade" and r["side"] is None and r["stake"] == 0.0
+                   and r["capped_side"] == "yes" for r in capped)
+        scan = world.last_scan()
+        assert scan["n_open"] == 6 and scan["n_capped"] == 2 and scan["n_no_trade"] == 2
+
+    def test_the_cap_is_a_flag(self, world):
+        world.markets = [market(i) for i in range(1, 4)]
+        assert world.scan("--max-trades-per-scan", "1") == 0
+        assert sum(r["status"] == "open" for r in world.decisions()) == 1
+        assert world.decisions()[0]["params"]["max_trades_per_scan"] == 1
+
+    def test_no_trade_decisions_do_not_use_up_the_cap(self, world):
+        world.markets = [market(i) for i in range(1, 4)]
+        world.forecaster = lambda q: good_forecast(0.43) if "candidate 1" in q else good_forecast()
+        assert world.scan("--max-trades-per-scan", "2") == 0
+        assert sum(r["status"] == "open" for r in world.decisions()) == 2
+        assert world.last_scan()["n_capped"] == 0
 
 
 class TestAlreadyAndClusters:
@@ -1008,7 +1095,7 @@ def scan_row(**overrides) -> dict:
 FULL_REPORT_KEYS = {
     "population", "n_settled", "n_trades", "total_pnl", "roi", "win_rate",
     "roi_ci_low", "roi_ci_high", "brier_blend_traded", "brier_market_traded",
-    "max_drawdown", "n_clusters",
+    "max_drawdown", "n_clusters", "coin_baseline",
 }
 
 
@@ -1024,7 +1111,24 @@ class TestReportShape:
         for population in ft.POPULATIONS:
             assert ft._report(decisions, "shadow", population) == {
                 "population": population, "n_settled": 0, "n_trades": 0,
+                "coin_baseline": {"n_markets": 0, "n_trades": 0},
             }
+
+    def test_coin_baseline_trades_every_resolved_market_at_half(self):
+        # Market at 0.30, constant 0.50 -> edge +0.20 -> buys YES, whatever the model did.
+        rows = [
+            {**settled_row(0, outcome=True), "p_market_mid": 0.30},
+            {**settled_row(1, outcome=False), "status": "no_trade", "p_market_mid": 0.30},
+            {**settled_row(2), "status": "no_trade", "p_market_mid": 0.50},   # no edge
+            {**settled_row(3), "status": "open", "p_market_mid": 0.30},       # unresolved
+            {**settled_row(4, outcome=True), "status": "no_trade", "p_market_mid": 0.30,
+             "volume_final": 100_000.0},                                     # not primary
+        ]
+        coin = ft._report(rows, "shadow", "primary")["coin_baseline"]
+        assert coin["n_markets"] == 3 and coin["n_trades"] == 2
+        win = (1 - 0.31) / 0.31
+        assert coin["total_pnl"] == pytest.approx(100 * (win - 1))
+        assert ft._report(rows, "shadow", "all")["coin_baseline"]["n_trades"] == 3
 
     def test_settled_rows_produce_the_full_metric_block(self):
         rep = ft._report([settled_row(i) for i in range(4)], "shadow", "all")
@@ -1120,7 +1224,7 @@ class TestReportShape:
         assert s["universe"] == {
             "scan_min_volume_to_date": 20_000.0, "primary_min_final_volume": 500_000.0,
             "secondary_min_volume_at_decision": 500_000.0, "min_age_days": 3.0,
-            "max_open_per_cluster": 2, "evidence_ok_min_days": 8,
+            "max_open_per_cluster": 2, "max_trades_per_scan": 6, "evidence_ok_min_days": 8,
         }
         assert s["schedule"] == {"cron_utc": "17 */6 * * *", "window_hours": [12.0, 27.0],
                                  "nominal_horizon_hours": 24}
@@ -1132,7 +1236,8 @@ class TestReportShape:
         assert s["shadow"]["primary"]["n_settled"] == 2
         assert s["shadow"]["n_open"] == 1
         assert s["shadow"]["calibration"]["n_resolved"] == 3
-        assert s["official"]["all"] == {"population": "all", "n_settled": 0, "n_trades": 0}
+        assert s["official"]["all"] == {"population": "all", "n_settled": 0, "n_trades": 0,
+                                        "coin_baseline": {"n_markets": 0, "n_trades": 0}}
         assert s["baseline"]["n_trades"] == 124 and s["baseline"]["test_roi"] == 0.3178
         assert s["baseline"]["test_ci_90"] == [0.0692, 0.5865]
         assert s["baseline"]["claude_reference"]["test_roi"] == 0.3052

@@ -59,6 +59,16 @@ class TestGdelt:
         articles = parse_articles(payload, cutoff)
         assert [a["title"] for a in articles] == ["before"]
 
+    def test_headlines_quoting_market_odds_dropped(self):
+        cutoff = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        payload = {"articles": [
+            {"title": "Polymarket gives Lula 80% chance", "seendate": "20260331T120000Z"},
+            {"title": "Kalshi traders pile into Bitcoin", "seendate": "20260331T120000Z"},
+            {"title": "Lula leads final Datafolha poll", "seendate": "20260331T120000Z"},
+        ]}
+        assert [a["title"] for a in parse_articles(payload, cutoff)] == [
+            "Lula leads final Datafolha poll"]
+
     def test_malformed_seendate_dropped(self):
         cutoff = datetime(2026, 4, 1, tzinfo=timezone.utc)
         payload = {"articles": [{"title": "bad", "seendate": "not-a-date"}]}

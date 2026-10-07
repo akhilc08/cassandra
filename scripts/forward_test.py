@@ -67,6 +67,7 @@ from oracle.evaluation.pnl import (  # noqa: E402
     decide_trade,
     simulate,
 )
+from oracle.ingestion.gdelt_client import fetch_news_status  # noqa: E402
 from oracle.ingestion.wiki_events import fetch_days_before, relevant_events  # noqa: E402
 
 logger = structlog.get_logger()
@@ -110,6 +111,24 @@ RETRYABLE_STATUSES = {"forecast_failed"}
 EVIDENCE_OK_MIN_DAYS = 8
 WIKI_LOOKBACK_DAYS = 10
 WIKI_CACHE_RETENTION_DAYS = 40
+
+# News channel (`scan --news gdelt`): GDELT headlines seen before the scan, the
+# same source and lookback the time-machine backtest uses when it is not run
+# with --skip-gdelt. GDELT serialises requests ~10s apart, so a big scan (83
+# forecasts on 2026-10-04) cannot fetch news for everything inside the step
+# timeout: after NEWS_BUDGET_SECONDS the rest forecast without headlines and say
+# so (news_status="budget"). Off by default: turning it on changes the
+# forecaster's information set, which the pre-registration must name.
+NEWS_CHOICES = ("off", "gdelt")
+NEWS_LOOKBACK_DAYS = 10
+NEWS_BUDGET_SECONDS = 540.0
+
+# At most this many new trades per scan. The shadow period's worst night opened
+# 21 trades on one Brazilian election in a single scan, each in its own event
+# cluster, so the per-cluster cap never fired. Trades beyond the cap are taken
+# in the order forecasts finish -- unrelated to outcome, so the kept sample is
+# unbiased -- and the rest are logged as no_trade with cap_skipped=true.
+MAX_TRADES_PER_SCAN = 6
 
 # Schedule: four scans a day. Actions cron drifts by hours, so the window is
 # wider than the cadence (15h between runs still leaves no market unseen) and
@@ -495,7 +514,9 @@ def new_scan_record(now: datetime, args) -> dict:
         "n_raw": 0, "gamma_pages": 0, "gamma_truncated": False, "n_candidates": 0,
         "n_illiquid": 0, "n_book_failed": 0, "n_market_failed": 0,
         "n_forecast_attempted": 0, "n_forecast_ok": 0, "n_forecast_failed": 0,
-        "n_open": 0, "n_no_trade": 0,
+        "n_open": 0, "n_no_trade": 0, "n_capped": 0,
+        "news": getattr(args, "news", "off"), "n_news_ok": 0, "n_news_empty": 0,
+        "n_news_failed": 0, "n_news_budget": 0,
         "wiki_days_ok": 0, "wiki_days_cached": 0, "wiki_days_failed": 0,
         "coverage_gap_hours": 0.0, "duration_s": None, "error": None,
     }
@@ -540,6 +561,10 @@ def _scan_verdict(record: dict) -> tuple[str, str | None]:
         return "forecast_outage", "candidates found but not one forecast succeeded"
     if not attempted and record["n_book_failed"]:
         return "clob_outage", "candidates found but every order-book request failed"
+    news_tried = record["n_news_ok"] + record["n_news_empty"] + record["n_news_failed"]
+    if news_tried and record["n_news_failed"] == news_tried:
+        return ("news_degraded",
+                f"every one of {news_tried} GDELT requests failed; rows forecast without headlines")
     if record["wiki_days_ok"] < EVIDENCE_OK_MIN_DAYS:
         days = f"{record['wiki_days_ok']}/{WIKI_LOOKBACK_DAYS}"
         return ("evidence_degraded",
@@ -593,6 +618,26 @@ async def _scan(args, now: datetime, record: dict) -> int:
             return 0
         evidence_ok = wiki["days_ok"] >= EVIDENCE_OK_MIN_DAYS
 
+        news_deadline = time.monotonic() + NEWS_BUDGET_SECONDS
+        n_trades = 0
+
+        async def get_news(question: str) -> tuple[list[dict], str]:
+            if args.news == "off":
+                return [], "off"
+            remaining = news_deadline - time.monotonic()
+            try:
+                if remaining <= 0:
+                    raise TimeoutError
+                headlines, status = await asyncio.wait_for(
+                    fetch_news_status(question, now, lookback_days=NEWS_LOOKBACK_DAYS,
+                                      client=client),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                headlines, status = [], "budget"
+            record[f"n_news_{status}"] += 1
+            return headlines, status
+
         forecast_slots = asyncio.Semaphore(args.concurrency)
         book_slots = asyncio.Semaphore(8)
         lock = asyncio.Lock()
@@ -614,6 +659,7 @@ async def _scan(args, now: datetime, record: dict) -> int:
             return resp.json()
 
         async def process_market(market_id: str, m: dict) -> None:
+            nonlocal n_trades
             yes_tok, no_tok = token_ids(m)
             try:
                 yes_book, no_book = await get_book(yes_tok), await get_book(no_tok)
@@ -631,13 +677,14 @@ async def _scan(args, now: datetime, record: dict) -> int:
                 return
             p_mid = (yes_bid + yes_ask) / 2
             wiki_evidence = relevant_events(m["question"], events_by_date)
+            headlines, news_status = await get_news(m["question"])
 
             record["n_forecast_attempted"] += 1
             async with forecast_slots:
                 f = await forecast(
                     question=m["question"],
                     as_of=as_of,
-                    headlines=[],  # backtest ran --skip-gdelt; replica must match
+                    headlines=headlines,
                     world_events=wiki_evidence,
                     description=(m.get("description") or "")[:500],
                 )
@@ -668,6 +715,8 @@ async def _scan(args, now: datetime, record: dict) -> int:
                 "reasoning": f.reasoning,
                 "raw_response": f.raw_response,  # v1 dropped this; the dashboard needs it
                 "n_wiki_events": len(wiki_evidence),
+                "news_status": news_status,
+                "n_headlines": len(headlines),
                 "wiki_days_ok": wiki["days_ok"],
                 "evidence_ok": evidence_ok,
                 "book": {"yes_bid": yes_bid, "yes_ask": yes_ask,
@@ -679,6 +728,8 @@ async def _scan(args, now: datetime, record: dict) -> int:
                     "scan_min_volume": args.min_volume,
                     "primary_min_final_volume": PRIMARY_MIN_FINAL_VOLUME,
                     "window_hours": [args.min_hours, args.max_hours],
+                    "news": args.news,
+                    "max_trades_per_scan": args.max_trades_per_scan,
                 },
             }
 
@@ -705,6 +756,17 @@ async def _scan(args, now: datetime, record: dict) -> int:
                 event_id=base["cluster_key"],
             )
             trade = decide_trade(bet, params)
+            # Check-and-increment with no await between them: atomic under asyncio.
+            if trade is not None and n_trades >= args.max_trades_per_scan:
+                record["n_capped"] += 1
+                record["n_no_trade"] += 1
+                base.update({"status": "no_trade", "side": None, "stake": 0.0,
+                             "edge": trade.edge, "cap_skipped": True,
+                             "capped_side": trade.side})
+                await log_row(base)
+                return
+            if trade is not None:
+                n_trades += 1
             if trade is None:
                 record["n_no_trade"] += 1
                 base.update({"status": "no_trade", "side": None, "stake": 0.0,
@@ -907,24 +969,53 @@ async def stage_settle(args) -> int:
 
 def _settled(decisions: list[dict], mode: str, population: str) -> list[dict]:
     """Settled rows of one mode in one of the three analysis populations."""
-    out = []
-    for d in decisions:
-        if d.get("status") != "settled" or d.get("mode") != mode:
-            continue
-        if population == "primary" and not (
-            d.get("evidence_ok") and float(d.get("volume_final") or 0) >= PRIMARY_MIN_FINAL_VOLUME
-        ):
-            continue
-        if population == "secondary_at_decision" and float(d.get("volume") or 0) < MIN_VOLUME:
-            continue
-        out.append(d)
-    return out
+    return [d for d in decisions
+            if d.get("status") == "settled" and d.get("mode") == mode
+            and _in_population(d, population)]
+
+
+def _in_population(d: dict, population: str) -> bool:
+    if population == "primary":
+        return bool(d.get("evidence_ok")) and (
+            float(d.get("volume_final") or 0) >= PRIMARY_MIN_FINAL_VOLUME)
+    if population == "secondary_at_decision":
+        return float(d.get("volume") or 0) >= MIN_VOLUME
+    return True
+
+
+def _coin_baseline(decisions: list[dict], mode: str, population: str) -> dict:
+    """The frozen strategy fed a forecaster that always says 0.50, over every
+    resolved market the scan forecast (traded or not).
+
+    The model has to beat this to be adding anything: on the backtest's test
+    split the constant 0.50 made +53% against luna's +32%, so the strategy can
+    profit with no forecasting skill at all, from fading favourites.
+    """
+    rows = [d for d in decisions
+            if d.get("mode") == mode and d.get("status") in ("settled", "no_trade")
+            and d.get("outcome_yes") is not None and d.get("p_market_mid") is not None
+            and _in_population(d, population)]
+    bets = [
+        BetInput(
+            market_id=d["market_id"], question=d.get("question", ""), p_model=0.5,
+            p_market=d["p_market_mid"], outcome=bool(d["outcome_yes"]),
+            close_time=d.get("end_date") or "", category=d.get("category", ""),
+            event_id=d.get("cluster_key") or d["market_id"],
+        )
+        for d in rows
+    ]
+    rep = simulate(bets, load_frozen_params())
+    if not rep.n_trades:
+        return {"n_markets": len(rows), "n_trades": 0}
+    return {"n_markets": len(rows), "n_trades": rep.n_trades, "total_pnl": rep.total_pnl,
+            "roi": rep.roi, "roi_ci_low": rep.roi_ci_low, "roi_ci_high": rep.roi_ci_high}
 
 
 def _report(decisions: list[dict], mode: str, population: str) -> dict:
     rows = _settled(decisions, mode, population)
+    coin = _coin_baseline(decisions, mode, population)
     if not rows:
-        return {"population": population, "n_settled": 0, "n_trades": 0}
+        return {"population": population, "n_settled": 0, "n_trades": 0, "coin_baseline": coin}
     bets = [
         BetInput(
             market_id=d["market_id"], question=d["question"], p_model=d["p_model"],
@@ -950,6 +1041,7 @@ def _report(decisions: list[dict], mode: str, population: str) -> dict:
         "brier_market_traded": rep.brier_market_traded,
         "max_drawdown": rep.max_drawdown,
         "n_clusters": len({d.get("cluster_key") for d in rows}),
+        "coin_baseline": coin,
     }
 
 
@@ -969,6 +1061,8 @@ def _calibration(decisions: list[dict], mode: str, params: StrategyParams) -> di
         "n_in_band": len(in_band),
         "brier_model_in_band": _brier([(p, y) for p, _, y in in_band]),
         "brier_market_in_band": _brier([(q, y) for _, q, y in in_band]),
+        # A constant 0.50 scores exactly this; a model above it has no skill.
+        "brier_coin": 0.25,
     }
 
 
@@ -1077,6 +1171,11 @@ def _print_report(summary: dict) -> None:
                       f"{r['roi_ci_high']*100:+.1f}%]  clusters={r['n_clusters']}")
             else:
                 print(f"  {label:<30} settled={r['n_settled']:>4}  no trades yet")
+            coin = r["coin_baseline"]
+            if coin["n_trades"]:
+                print(f"  {'':<30} coin 0.50 baseline: trades={coin['n_trades']:>4}  "
+                      f"ROI={coin['roi']*100:>+6.1f}%  CI=[{coin['roi_ci_low']*100:+.1f}%, "
+                      f"{coin['roi_ci_high']*100:+.1f}%]")
     print(f"  -> {SUMMARY_FILE}")
 
 
@@ -1100,6 +1199,7 @@ def stage_report(args) -> int:
             "secondary_min_volume_at_decision": MIN_VOLUME,
             "min_age_days": MIN_AGE_DAYS,
             "max_open_per_cluster": MAX_OPEN_PER_CLUSTER,
+            "max_trades_per_scan": MAX_TRADES_PER_SCAN,
             "evidence_ok_min_days": EVIDENCE_OK_MIN_DAYS,
         },
         "schedule": {
@@ -1140,6 +1240,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-markets", type=int, default=150)
     s.add_argument("--max-pages", type=int, default=6)
     s.add_argument("--concurrency", type=int, default=4)
+    s.add_argument("--news", choices=NEWS_CHOICES, default="off",
+                   help="headline source for the forecaster (off reproduces the backtest replica)")
+    s.add_argument("--max-trades-per-scan", type=int, default=MAX_TRADES_PER_SCAN)
 
     sub.add_parser("settle")
     sub.add_parser("report")
