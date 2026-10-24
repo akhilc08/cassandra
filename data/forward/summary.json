@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-24T11:06:24.066377+00:00",
+  "generated_at": "2026-10-24T16:00:00.104506+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 20000.0,
@@ -24,13 +24,13 @@
     "look": "one confirmatory look when the primary population reaches 200 settled trades",
     "interim": true
   },
-  "last_decision_ts": "2026-10-24T11:06:13.050968+00:00",
+  "last_decision_ts": "2026-10-24T15:59:53.181287+00:00",
   "counts": {
-    "no_trade": 386,
+    "no_trade": 389,
     "settled": 127,
-    "open": 14
+    "open": 15
   },
-  "n_decisions": 527,
+  "n_decisions": 531,
   "shadow": {
     "primary": {
       "population": "primary",
@@ -75,14 +75,14 @@
       "n_clusters": 109
     },
     "calibration": {
-      "n_resolved": 486,
-      "brier_model": 0.25700473251028805,
-      "brier_market": 0.09273164094650206,
-      "n_in_band": 299,
-      "brier_model_in_band": 0.26537658862876257,
-      "brier_market_in_band": 0.14095567056856187
+      "n_resolved": 487,
+      "brier_model": 0.25716776180698153,
+      "brier_market": 0.093292818275154,
+      "n_in_band": 300,
+      "brier_model_in_band": 0.2656133333333333,
+      "brier_market_in_band": 0.14170590166666666
     },
-    "n_open": 14
+    "n_open": 15
   },
   "official": {
     "primary": {
@@ -106,21 +106,21 @@
     "n_open": 0
   },
   "scan_health": {
-    "last_scan_ts": "2026-10-24T11:06:13.050968+00:00",
+    "last_scan_ts": "2026-10-24T15:59:53.181287+00:00",
     "hours_since_last_scan": 0.0,
     "last_status": "ok",
     "last_exit_code": 0,
     "runs_last_7d": 27,
     "failed_runs_last_7d": 0,
     "last_run": {
-      "ts": "2026-10-24T11:06:13.050968+00:00",
+      "ts": "2026-10-24T15:59:53.181287+00:00",
       "mode": "shadow",
       "exit_code": 0,
       "status": "ok",
       "window_lo": 12.0,
       "window_hi": 27.0,
       "scan_min_volume": 20000.0,
-      "n_raw": 225,
+      "n_raw": 297,
       "gamma_pages": 4,
       "gamma_truncated": false,
       "n_candidates": 5,
@@ -130,13 +130,13 @@
       "n_forecast_attempted": 4,
       "n_forecast_ok": 4,
       "n_forecast_failed": 0,
-      "n_open": 3,
-      "n_no_trade": 1,
+      "n_open": 1,
+      "n_no_trade": 3,
       "wiki_days_ok": 10,
       "wiki_days_cached": 10,
       "wiki_days_failed": 0,
       "coverage_gap_hours": 0.0,
-      "duration_s": 9.6,
+      "duration_s": 5.8,
       "error": null
     },
     "evidence": {
