@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-26T13:09:05.636457+00:00",
+  "generated_at": "2026-10-26T22:42:51.755845+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 20000.0,
@@ -24,27 +24,27 @@
     "look": "one confirmatory look when the primary population reaches 200 settled trades",
     "interim": true
   },
-  "last_decision_ts": "2026-10-26T13:08:57.811921+00:00",
+  "last_decision_ts": "2026-10-26T22:42:40.396104+00:00",
   "counts": {
-    "no_trade": 425,
-    "settled": 148,
-    "open": 14
+    "no_trade": 433,
+    "settled": 150,
+    "open": 16
   },
-  "n_decisions": 587,
+  "n_decisions": 599,
   "shadow": {
     "primary": {
       "population": "primary",
-      "n_settled": 53,
-      "n_trades": 53,
-      "total_pnl": -1736.5796698340375,
-      "roi": -0.3276565414781203,
-      "win_rate": 0.22641509433962265,
-      "roi_ci_low": -0.6054886418556008,
-      "roi_ci_high": -0.025653174931870252,
-      "brier_blend_traded": 0.27196603773584904,
-      "brier_market_traded": 0.19675688679245282,
+      "n_settled": 54,
+      "n_trades": 54,
+      "total_pnl": -1836.5796698340375,
+      "roi": -0.3401073462655625,
+      "win_rate": 0.2222222222222222,
+      "roi_ci_low": -0.6110285218456658,
+      "roi_ci_high": -0.04238935591736744,
+      "brier_blend_traded": 0.2706796296296296,
+      "brier_market_traded": 0.1946174074074074,
       "max_drawdown": 2513.4915201628396,
-      "n_clusters": 49
+      "n_clusters": 50
     },
     "secondary_at_decision": {
       "population": "secondary_at_decision",
@@ -62,27 +62,27 @@
     },
     "all": {
       "population": "all",
-      "n_settled": 148,
-      "n_trades": 148,
-      "total_pnl": -3048.999421749679,
-      "roi": -0.2060134744425459,
-      "win_rate": 0.2972972972972973,
-      "roi_ci_low": -0.4121389681334056,
-      "roi_ci_high": 0.0014660980208651636,
-      "brier_blend_traded": 0.2300891891891892,
-      "brier_market_traded": 0.17193200337837838,
+      "n_settled": 150,
+      "n_trades": 150,
+      "total_pnl": -3248.999421749679,
+      "roi": -0.21659996144997862,
+      "win_rate": 0.29333333333333333,
+      "roi_ci_low": -0.41038696693630977,
+      "roi_ci_high": -0.010404231614388451,
+      "brier_blend_traded": 0.230038,
+      "brier_market_traded": 0.17038524333333332,
       "max_drawdown": 3971.1222938719693,
-      "n_clusters": 126
+      "n_clusters": 128
     },
     "calibration": {
-      "n_resolved": 542,
-      "brier_model": 0.2539826568265683,
-      "brier_market": 0.10048587730627306,
-      "n_in_band": 345,
-      "brier_model_in_band": 0.2617791304347826,
-      "brier_market_in_band": 0.14663425072463768
+      "n_resolved": 550,
+      "brier_model": 0.25335545454545455,
+      "brier_market": 0.1008398859090909,
+      "n_in_band": 349,
+      "brier_model_in_band": 0.26175558739255017,
+      "brier_market_in_band": 0.1478138187679083
     },
-    "n_open": 14
+    "n_open": 16
   },
   "official": {
     "primary": {
@@ -106,43 +106,43 @@
     "n_open": 0
   },
   "scan_health": {
-    "last_scan_ts": "2026-10-26T13:08:57.811921+00:00",
+    "last_scan_ts": "2026-10-26T22:42:40.396104+00:00",
     "hours_since_last_scan": 0.0,
     "last_status": "ok",
     "last_exit_code": 0,
-    "runs_last_7d": 28,
+    "runs_last_7d": 27,
     "failed_runs_last_7d": 0,
     "last_run": {
-      "ts": "2026-10-26T13:08:57.811921+00:00",
+      "ts": "2026-10-26T22:42:40.396104+00:00",
       "mode": "shadow",
       "exit_code": 0,
       "status": "ok",
       "window_lo": 12.0,
       "window_hi": 27.0,
       "scan_min_volume": 20000.0,
-      "n_raw": 145,
-      "gamma_pages": 3,
+      "n_raw": 227,
+      "gamma_pages": 4,
       "gamma_truncated": false,
-      "n_candidates": 5,
-      "n_illiquid": 1,
+      "n_candidates": 12,
+      "n_illiquid": 0,
       "n_book_failed": 0,
       "n_market_failed": 0,
-      "n_forecast_attempted": 4,
-      "n_forecast_ok": 4,
+      "n_forecast_attempted": 12,
+      "n_forecast_ok": 12,
       "n_forecast_failed": 0,
-      "n_open": 0,
-      "n_no_trade": 4,
+      "n_open": 4,
+      "n_no_trade": 8,
       "wiki_days_ok": 10,
       "wiki_days_cached": 10,
       "wiki_days_failed": 0,
       "coverage_gap_hours": 0.0,
-      "duration_s": 6.6,
+      "duration_s": 10.3,
       "error": null
     },
     "evidence": {
       "last_wiki_days_ok": 10,
-      "decisions_last_14d": 278,
-      "decisions_with_evidence_last_14d": 278
+      "decisions_last_14d": 285,
+      "decisions_with_evidence_last_14d": 285
     }
   },
   "health": "ok",
