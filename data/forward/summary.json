@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T05:52:32.620816+00:00",
+  "generated_at": "2026-10-29T13:07:31.852010+00:00",
   "mode": "shadow",
   "model": "gpt-5.6-luna",
   "min_volume": 20000.0,
@@ -24,13 +24,13 @@
     "look": "one confirmatory look when the primary population reaches 200 settled trades",
     "interim": true
   },
-  "last_decision_ts": "2026-10-29T05:52:19.948769+00:00",
+  "last_decision_ts": "2026-10-29T13:07:22.355598+00:00",
   "counts": {
-    "no_trade": 456,
+    "no_trade": 463,
     "settled": 163,
     "open": 24
   },
-  "n_decisions": 643,
+  "n_decisions": 650,
   "shadow": {
     "primary": {
       "population": "primary",
@@ -106,21 +106,21 @@
     "n_open": 0
   },
   "scan_health": {
-    "last_scan_ts": "2026-10-29T05:52:19.948769+00:00",
+    "last_scan_ts": "2026-10-29T13:07:22.355598+00:00",
     "hours_since_last_scan": 0.0,
     "last_status": "ok",
     "last_exit_code": 0,
     "runs_last_7d": 26,
     "failed_runs_last_7d": 0,
     "last_run": {
-      "ts": "2026-10-29T05:52:19.948769+00:00",
+      "ts": "2026-10-29T13:07:22.355598+00:00",
       "mode": "shadow",
       "exit_code": 0,
       "status": "ok",
       "window_lo": 12.0,
       "window_hi": 27.0,
       "scan_min_volume": 20000.0,
-      "n_raw": 151,
+      "n_raw": 132,
       "gamma_pages": 3,
       "gamma_truncated": false,
       "n_candidates": 11,
@@ -130,19 +130,19 @@
       "n_forecast_attempted": 7,
       "n_forecast_ok": 7,
       "n_forecast_failed": 0,
-      "n_open": 3,
-      "n_no_trade": 4,
+      "n_open": 0,
+      "n_no_trade": 7,
       "wiki_days_ok": 10,
-      "wiki_days_cached": 9,
+      "wiki_days_cached": 10,
       "wiki_days_failed": 0,
       "coverage_gap_hours": 0.0,
-      "duration_s": 11.0,
+      "duration_s": 8.0,
       "error": null
     },
     "evidence": {
       "last_wiki_days_ok": 10,
-      "decisions_last_14d": 277,
-      "decisions_with_evidence_last_14d": 277
+      "decisions_last_14d": 284,
+      "decisions_with_evidence_last_14d": 284
     }
   },
   "health": "ok",
